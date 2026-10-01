@@ -11,6 +11,7 @@ import { discoverRenderers, renderSvgPng, noRendererMessage, decodeImageWithBrow
 import { renderSheet, DEFAULT_SHEET_SIZES, DEFAULT_CHECK_SIZES } from './lib/sheet.mjs';
 import { runExport, TARGETS } from './lib/export.mjs';
 import { importImage, describeImport, DEFAULT_TOLERANCE, BACKGROUND_MODES } from './lib/importimg.mjs';
+import { resolveNamedPath, resolveInputFile, linkNote } from './lib/publish.mjs';
 
 const USAGE = `icon-creator: design-time icon toolchain for app icons (no dependencies)
 
@@ -135,6 +136,18 @@ function pickRenderer(discovery, wanted) {
 
 const log = (message) => process.stdout.write(`${message}\n`);
 
+/**
+ * Say out loud when a path the user named goes through a symbolic link or a
+ * junction (macOS /var and /tmp, a linked project folder): the tool follows
+ * it once and works in the real location, and the user should know where.
+ * A link inside the current folder is refused here with the real path.
+ */
+function noteLinks(label, typed, { file = false, input = false } = {}) {
+  // An input file is checked as a whole (its folder, and the file must not be a link).
+  const resolved = input ? resolveInputFile(typed) : resolveNamedPath(file ? path.dirname(path.resolve(typed)) : typed);
+  if (resolved.linked) log(linkNote(label, input ? { ...resolved, typed: path.dirname(resolved.typed), path: path.dirname(resolved.path) } : resolved));
+}
+
 async function main() {
   const [subcommand, ...rest] = process.argv.slice(2);
   if (!subcommand || subcommand === '--help' || subcommand === '-h') {
@@ -233,6 +246,8 @@ async function importCommand(options) {
   }
   const { base, cleanup } = makeTempBase();
   try {
+    noteLinks('The image file is in', srcPath, { file: true });
+    noteLinks('The output folder', options.out);
     // The browser is only needed for JPEG, WebP and BMP: find it on demand.
     const browserDecode = async ({ imagePath, width, height }) => {
       const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
@@ -291,6 +306,8 @@ async function renderOne(options) {
   }
   const { base, cleanup } = makeTempBase();
   try {
+    noteLinks('The folder of the SVG file', svgPath, { input: true });
+    noteLinks('The folder of the output file', options.out, { file: true });
     const analysis = await renderSvgPng({
       svgPath,
       size,
@@ -333,6 +350,8 @@ async function sheet(options) {
   }
   const { base, cleanup } = makeTempBase();
   try {
+    for (const svgPath of svgPaths) noteLinks('The folder of the SVG file', svgPath, { input: true });
+    noteLinks('The folder of the output file', options.out, { file: true });
     await renderSheet({
       svgPaths: svgPaths.map((p) => path.resolve(p)),
       outPath: path.resolve(options.out),
@@ -374,6 +393,9 @@ async function check(options) {
   }
   const { base, cleanup } = makeTempBase();
   try {
+    noteLinks('The folder of the SVG file', svgPath, { input: true });
+    if (options.small) noteLinks('The folder of the small-variant SVG', options.small, { input: true });
+    noteLinks('The folder of the output file', options.out, { file: true });
     const metricsOut = path.join(base, 'metric-16.png');
     const metrics = await renderSvgPng({ svgPath: path.resolve(svgPath), size: 16, outPath: metricsOut, renderer, tempDir: base, log: () => {} });
     const m = metrics.analysis;
@@ -435,6 +457,9 @@ async function exportAll(options) {
   const workDir = path.join(base, 'work');
   fs.mkdirSync(workDir, { recursive: true });
   try {
+    noteLinks('The folder of the SVG file', svgPath, { input: true });
+    if (options.small) noteLinks('The folder of the small-variant SVG', options.small, { input: true });
+    noteLinks('The output folder', options.out);
     const result = await runExport({
       svgPath: path.resolve(svgPath),
       smallPath: options.small ? path.resolve(options.small) : null,

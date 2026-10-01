@@ -20,6 +20,17 @@ its own temporary scratch folder (see the last section).
 
 ## Workflow
 
+**Paths and links.** This applies to every path you pass - the SVG or image you
+read as well as the folder or file you write. A path may go through a symbolic link or junction
+that is outside the current folder (macOS `/var`, `/tmp`, a linked project
+folder, a Windows junction): the tool follows it once and prints a line starting
+with `Note:` that names the real location - when you see one, tell the user where
+the files really are (an input file's note names its folder). A file that is
+itself a link is refused as an input. If a command is refused because a link lies INSIDE the
+current folder, the error names the real path it points to: show that to the user
+and run the command again with that path; do not look for a way around the
+refusal.
+
 ### 1. Check the machine
 
 Run `doctor` first. If it reports no renderer at all, stop and tell the user
@@ -82,8 +93,8 @@ lower-cased, with every other character turned into `-`. Say which you chose.
     node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs" import "C:\art\my-logo.png" --out icon-work --name my-app
 
 The tool detects the format from the file's content (PNG, JPEG, WebP, GIF first
-frame, BMP or SVG; the extension is ignored), refuses directories, links,
-files over 25 MB and images over 8192 x 8192 px, and writes
+frame, BMP or SVG; the extension is ignored), refuses directories, a file that
+is itself a link, files over 25 MB and images over 8192 x 8192 px, and writes
 `icon-work/my-app-master.png` (a square transparent PNG, 1024 px or smaller if
 the image is smaller, never enlarged, a non-square picture centred without
 stretching or cropping) and `icon-work/my-app-master.svg` (a wrapper around that
@@ -483,8 +494,8 @@ say the user can delete it (and `preview/`).
 
 No network requests, no telemetry, and it never overwrites an existing file
 without `--force`. It reads no user files beyond the SVGs you point it at and
-the one image file the user named for `import` (a regular file, no links in its
-path, at most 25 MB and 8192 x 8192 px, format detected from the content,
+the one image file the user named for `import` (a regular file that is not
+itself a link, at most 25 MB and 8192 x 8192 px, format detected from the content,
 metadata not interpreted, nothing in it executed or fetched; for JPEG, WebP
 and BMP the headless browser opens that one file as a picture to decode it);
 it does read back what it generated itself (rendered PNGs and the temporary

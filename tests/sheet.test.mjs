@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { renderSheet } from '../scripts/lib/sheet.mjs';
 import { encodePng, decodePng } from '../scripts/lib/png.mjs';
-import { removeTree } from './helpers.mjs';
+import { removeTree, dirLinkSkipReason, makeAliasedTemp } from './helpers.mjs';
 
 const MASTER_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">' +
@@ -160,6 +160,26 @@ test('a sheet with a single concept and single size still lays out correctly', a
     // icon ink at the single cell's center, both blocks
     assert.equal(pixel(decoded, 144, 144)[3], 255);
     assert.equal(pixel(decoded, 144, 288 + 8 + 144)[3], 255);
+  } finally {
+    removeTree(base);
+  }
+});
+
+test('a sheet written through a link in the named output path lands in the real folder', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    const a = path.join(real, 'concept-a.svg');
+    fs.writeFileSync(a, MASTER_SVG);
+    const result = await renderSheet({
+      svgPaths: [a],
+      outPath: path.join(linked, 'sheet.png'),
+      renderer: CLI_RENDERER,
+      tempDir: base,
+      sizes: [32],
+      render: makeFakeRender().render,
+    });
+    assert.ok(fs.existsSync(path.join(real, 'sheet.png')), 'the sheet is in the real folder');
+    assert.equal(result.width, 288);
   } finally {
     removeTree(base);
   }

@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { assertRealParentChain } from './publish.mjs';
+import { resolveNamedPath } from './publish.mjs';
 
 export const MAX_INPUT_BYTES = 25 * 1024 * 1024;
 export const MAX_SIDE = 8192;
@@ -171,15 +171,18 @@ export function assertDimensions(width, height, label = 'the image') {
 
 /**
  * Open and classify the file the user named. Refuses anything that is not a
- * regular, readable file reached through real directories, anything over the
+ * regular, readable file that is not itself a link, anything over the
  * byte cap, anything whose content is not a supported image, and (before any
  * decoding) anything whose header dimensions exceed the cap.
  * Returns { path, buffer, format, width, height } (width/height are null for
  * SVG, which has no pixel size).
  */
 export function loadSource(filePath) {
-  const absolute = path.resolve(filePath);
-  assertRealParentChain(absolute);
+  // Links in the directories of the path the user named are resolved once (the
+  // operating system's own, such as macOS /var, or the user's); a link inside
+  // the current folder is refused. The file itself must not be a link.
+  const typed = path.resolve(filePath);
+  const absolute = path.join(resolveNamedPath(path.dirname(typed), { reading: true }).path, path.basename(typed));
   let stat;
   try {
     stat = fs.lstatSync(absolute);

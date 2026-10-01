@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { validateSvg } from './svgcheck.mjs';
 import { pngInfo, decodePng, analyzeRgba } from './png.mjs';
-import { assertRealParentChain, publishExclusive } from './publish.mjs';
+import { resolveOutputFile, resolveInputFile, publishExclusive } from './publish.mjs';
 
 /**
  * Verify a rendered PNG before anything else consumes it: exact pixel size
@@ -250,6 +250,8 @@ let profileCounter = 0;
  * profile, the HTML page and the scratch PNG.
  */
 export async function renderSvgPng({ svgPath, size, outPath, renderer, tempDir, force = false, log = () => {} }) {
+  outPath = resolveOutputFile(outPath).path;
+  svgPath = resolveInputFile(svgPath).path;
   if (!force && fs.existsSync(outPath)) {
     throw new Error(`${outPath} already exists; pass --force to overwrite it`);
   }
@@ -262,7 +264,6 @@ export async function renderSvgPng({ svgPath, size, outPath, renderer, tempDir, 
   if (outStat !== null && outStat.isSymbolicLink()) {
     throw new Error(`${outPath} is a symbolic link: refusing to write through it`);
   }
-  assertRealParentChain(outPath);
   const svgText = fs.readFileSync(svgPath, 'utf8');
   const validation = validateSvg(svgText, { label: svgPath });
   if (!validation.ok) {

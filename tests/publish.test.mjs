@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { assertRealParentChain, publishExclusive } from '../scripts/lib/publish.mjs';
+import { resolveOutputFile, resolveNamedPath, linkNote, publishExclusive } from '../scripts/lib/publish.mjs';
+import { dirLinkSkipReason, makeAliasedTemp, makeDirLink, withCwd } from './helpers.mjs';
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-pub-'));
+}
+
+/** A temp folder under its real name (on macOS os.tmpdir() sits behind /var -> /private/var). */
+function realTempDir() {
+  return fs.realpathSync(tempDir());
 }
 
 const linkSkipReason = (() => {
@@ -72,44 +78,127 @@ test('publishExclusive refuses a pre-planted staging entry instead of writing th
   }
 });
 
-test('assertRealParentChain accepts a real directory chain and rejects a missing one', () => {
-  const dir = tempDir();
+test('resolveOutputFile accepts a real directory chain and rejects a missing one', () => {
+  const dir = realTempDir();
   try {
     const real = path.join(dir, 'a', 'b', 'file.png');
     fs.mkdirSync(path.join(dir, 'a', 'b'), { recursive: true });
-    assert.doesNotThrow(() => assertRealParentChain(real));
-    assert.throws(() => assertRealParentChain(path.join(dir, 'missing', 'file.png')), /does not exist; create it first/);
+    const resolved = resolveOutputFile(real);
+    assert.equal(resolved.path, real);
+    assert.equal(resolved.linked, false);
+    assert.throws(() => resolveOutputFile(path.join(dir, 'missing', 'file.png')), /does not exist; create it first/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('assertRealParentChain rejects a symlinked parent directory', { skip: linkSkipReason }, () => {
-  const dir = tempDir();
-  try {
-    const outsideDir = path.join(dir, 'outside-dir');
-    fs.mkdirSync(outsideDir, { recursive: true });
-    const parent = path.join(dir, 'parent');
-    fs.symlinkSync(outsideDir, parent);
-    assert.throws(
-      () => assertRealParentChain(path.join(parent, 'file.png')),
-      /symbolic link or junction: refusing to write through it - pass the real path instead/,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('assertRealParentChain rejects a file sitting where a directory is needed', () => {
-  const dir = tempDir();
+test('resolveOutputFile rejects a file sitting where a directory is needed', () => {
+  const dir = realTempDir();
   try {
     const blocker = path.join(dir, 'blocker');
     fs.writeFileSync(blocker, 'not a directory');
-    assert.throws(
-      () => assertRealParentChain(path.join(blocker, 'file.png')),
-      /exists and is not a directory/,
-    );
+    assert.throws(() => resolveOutputFile(path.join(blocker, 'file.png')), /exists and is not a directory/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- links in the path the user named (macOS /var -> /private/var) ---------
+
+test('a link in the part of the path the user named is followed once, reported, and works', { skip: dirLinkSkipReason }, () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    fs.mkdirSync(path.join(real, 'out'));
+    // The working directory is the repository, far away from this folder, so the
+    // link is part of a location the user chose, like /var/folders behind /var.
+    const resolved = resolveNamedPath(path.join(linked, 'out'));
+    assert.equal(resolved.linked, true);
+    assert.equal(fs.realpathSync(resolved.path), fs.realpathSync(path.join(real, 'out')));
+    assert.ok(!resolved.path.split(path.sep).includes('alias'), `the result is the real location (${resolved.path})`);
+    assert.match(linkNote('The output folder', resolved), /^Note: The output folder .* goes through a symbolic link or junction; using its real location /);
+    // A file below the link resolves the same way, and a missing tail stays lexical.
+    const file = resolveOutputFile(path.join(linked, 'out', 'file.png'));
+    assert.equal(fs.realpathSync(path.dirname(file.path)), fs.realpathSync(path.join(real, 'out')));
+    assert.equal(path.basename(file.path), 'file.png');
+    const fresh = resolveNamedPath(path.join(linked, 'new', 'deeper'));
+    assert.equal(fresh.linked, true);
+    assert.equal(fresh.path, path.join(fs.realpathSync(real), 'new', 'deeper'));
+    // Links that point at links are followed all the way.
+    const second = path.join(base, 'alias2');
+    makeDirLink(linked, second);
+    assert.equal(fs.realpathSync(resolveNamedPath(path.join(second, 'out')).path), fs.realpathSync(path.join(real, 'out')));
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a link planted inside the current folder is refused, with the real path to pass instead', { skip: dirLinkSkipReason }, async () => {
+  const { base, real } = makeAliasedTemp();
+  try {
+    const project = path.join(base, 'project');
+    fs.mkdirSync(project);
+    makeDirLink(real, path.join(project, 'icon-work'));
+    await withCwd(project, () => {
+      const attempt = () => resolveOutputFile(path.join(project, 'icon-work', 'sheet.png'));
+      assert.throws(attempt, /icon-work is a symbolic link or junction inside the current folder .*: refusing to write through it - it points to /);
+      assert.throws(attempt, new RegExp(fs.realpathSync(real).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&').replace(/\\\\/g, '\\\\+') + '.*pass that real path instead'));
+      // The same link typed as a relative path is refused as well.
+      assert.throws(() => resolveOutputFile(path.join('icon-work', 'sheet.png')), /inside the current folder/);
+      // A real folder next to it is fine.
+      fs.mkdirSync(path.join(project, 'plain'));
+      const plain = resolveOutputFile(path.join('plain', 'sheet.png'));
+      assert.equal(fs.realpathSync(path.dirname(plain.path)), fs.realpathSync(path.join(project, 'plain')));
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a project reached through a link is not mistaken for a planted link, but a link inside it still is', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    const project = path.join(real, 'project');
+    fs.mkdirSync(path.join(project, 'icons'), { recursive: true });
+    const elsewhere = path.join(base, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    await withCwd(project, () => {
+      // Typed through the alias: the alias is resolved (it lives above the project) ...
+      const ok = resolveOutputFile(path.join(linked, 'project', 'icons', 'sheet.png'));
+      assert.equal(ok.linked, true);
+      assert.equal(fs.realpathSync(path.dirname(ok.path)), fs.realpathSync(path.join(project, 'icons')));
+      // ... and a link planted in the project is refused even when reached the same way.
+      makeDirLink(elsewhere, path.join(project, 'redirect'));
+      assert.throws(
+        () => resolveOutputFile(path.join(linked, 'project', 'redirect', 'sheet.png')),
+        /redirect is a symbolic link or junction inside the current folder/,
+      );
+    });
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('working inside a project folder that is itself reached through a link works, and a planted link in it is still refused', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    fs.mkdirSync(path.join(real, 'project', 'icons'), { recursive: true });
+    const elsewhere = path.join(base, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    // The shell's current folder is typed through the link (a Windows junction
+    // keeps that spelling; POSIX reports the real folder - both must work).
+    await withCwd(path.join(linked, 'project'), () => {
+      const ok = resolveOutputFile(path.join('icons', 'sheet.png'));
+      assert.equal(fs.realpathSync(path.dirname(ok.path)), fs.realpathSync(path.join(real, 'project', 'icons')));
+      makeDirLink(elsewhere, path.join(real, 'project', 'redirect'));
+      assert.throws(() => resolveOutputFile(path.join('redirect', 'sheet.png')), /redirect is a symbolic link or junction inside the current folder/);
+      assert.throws(
+        () => resolveOutputFile(path.join(linked, 'project', 'redirect', 'sheet.png')),
+        /redirect is a symbolic link or junction inside the current folder/,
+      );
+    });
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });

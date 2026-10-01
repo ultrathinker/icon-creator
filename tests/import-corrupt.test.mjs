@@ -18,7 +18,7 @@ const discovery = discoverRenderers({ platform: process.platform, pathValue: pro
 const browserSkip = discovery.chosen !== null && discovery.chosen.kind === 'browser' ? undefined : 'no headless browser on this machine';
 
 function runCli(args) {
-  const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', windowsHide: true, timeout: 120000 });
+  const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', windowsHide: true, timeout: 900000 });
   return { code: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 

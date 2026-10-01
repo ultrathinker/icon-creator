@@ -23,12 +23,15 @@ import {
 } from './import-helpers.mjs';
 
 const CLI = path.resolve('scripts/icons.mjs');
+// A real render launches a browser; on a slow CI runner (GitHub's Windows
+// image needs ten seconds or more per render) one command can take minutes.
+const REAL_RENDER_TIMEOUT_MS = 900000;
 const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
 const hasBrowser = discovery.chosen !== null && discovery.chosen.kind === 'browser';
 const browserSkip = hasBrowser ? undefined : 'no headless browser on this machine';
 
 function runCli(args) {
-  const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', windowsHide: true, timeout: 180000 });
+  const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', windowsHide: true, timeout: REAL_RENDER_TIMEOUT_MS });
   return { code: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
@@ -175,10 +178,12 @@ test('imported masters flow through check and export; the export skips the vecto
     assert.match(check.stdout, /16 px transparent render: corners alpha \[0 0 0 0\]/);
     assert.ok(fs.existsSync(path.join(work, 'check-1.png')));
 
+    // Only the targets this test is about (the master and the Windows icon): every
+    // render launches a browser, and the full set is covered by the export tests.
     const set = path.join(dir, 'brand-set');
-    const exported = runCli(['export', master, '--out', set, '--name', 'brand', '--title', 'Brand']);
+    const exported = runCli(['export', master, '--out', set, '--name', 'brand', '--title', 'Brand', '--only', 'master,windows']);
     assert.equal(exported.code, 0, exported.stderr);
-    assert.match(exported.stdout, /Not written, because the master is a raster image.*icon\.svg.*scalable\/apps\/brand\.svg.*favicon\.svg/s);
+    assert.match(exported.stdout, /Not written, because the master is a raster image and no honest vector file exists: icon\.svg\./);
     const listing = [];
     const walk = (directory) => {
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -189,12 +194,11 @@ test('imported masters flow through check and export; the export skips the vecto
     };
     walk(set);
     assert.ok(!listing.some((rel) => rel.endsWith('.svg')), `no SVG in the set: ${listing.filter((rel) => rel.endsWith('.svg'))}`);
-    assert.ok(listing.includes('icon-1024.png') && listing.includes('windows/brand.ico') && listing.includes('macos/brand.icns'));
+    assert.deepEqual(listing.sort(), ['icon-1024.png', 'windows/brand.ico']);
     assert.deepEqual(
       parseIco(fs.readFileSync(path.join(set, 'windows', 'brand.ico'))).entries.map((entry) => entry.declaredWidth),
       [16, 24, 32, 48, 64, 128, 256],
     );
-    assert.ok(!fs.readFileSync(path.join(set, 'web', 'head.html'), 'utf8').includes('favicon.svg'));
   });
 });
 
@@ -232,11 +236,13 @@ test('an imported SVG is a real vector master: one file, and the export keeps ev
     assert.deepEqual(fs.readdirSync(work), ['term-master.svg'], 'no PNG master for an SVG source');
     assert.doesNotMatch(imported.stdout, /Background:|Corner alpha|\[[a-z0-9-]+\]/, 'no raster facts or warning codes');
 
+    // master + web is enough to see the vector files (the scalable Linux icon is
+    // pinned by the export unit test); fewer targets mean fewer browser launches.
     const set = path.join(dir, 'set');
-    const exported = runCli(['export', path.join(work, 'term-master.svg'), '--out', set, '--name', 'term']);
+    const exported = runCli(['export', path.join(work, 'term-master.svg'), '--out', set, '--name', 'term', '--only', 'master,web']);
     assert.equal(exported.code, 0, exported.stderr);
     assert.doesNotMatch(exported.stdout, /Not written/);
-    for (const rel of ['icon.svg', 'web/favicon.svg', 'linux/scalable/apps/term.svg']) {
+    for (const rel of ['icon.svg', 'web/favicon.svg']) {
       assert.ok(fs.existsSync(path.join(set, rel)), `${rel} is written for an SVG source`);
     }
     assert.match(fs.readFileSync(path.join(set, 'web', 'head.html'), 'utf8'), /favicon\.svg/);

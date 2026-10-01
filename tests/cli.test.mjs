@@ -17,7 +17,7 @@ function runCli(args) {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 120000,
+    timeout: 900000, // a real render launches a browser; slow CI runners need minutes
   });
   return { code: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }

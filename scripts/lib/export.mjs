@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateSvg } from './svgcheck.mjs';
 import { verifyRenderedPng } from './renderers.mjs';
-import { publishExclusive, assertRealAncestors } from './publish.mjs';
+import { publishExclusive, resolveNamedPath, resolveInputFile } from './publish.mjs';
 import { buildIco } from './ico.mjs';
 import { buildIcns } from './icns.mjs';
 
@@ -144,12 +144,11 @@ export function planFiles(name, targets, { vector = true } = {}) {
  * root itself may be a link the user deliberately chose.
  */
 export function ensureRealDir(outDir, relativeDir) {
-  // Every existing ancestor of the output root must be a real directory:
-  // creating the root recursively through a symlinked parent would place the
-  // whole export outside the path the user named. The root itself may be a
-  // link the user deliberately chose (the realpath containment below then
-  // anchors everything inside it).
-  assertRealAncestors(outDir);
+  // The path the user named is resolved once (links in it, such as macOS
+  // /var, are followed; a link inside the current folder is refused). Below
+  // the resolved root every directory must be real: the walk further down
+  // refuses a link planted inside the output folder.
+  outDir = resolveNamedPath(outDir).path;
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   } else if (!fs.statSync(outDir).isDirectory()) {
@@ -212,6 +211,9 @@ export function publishFile(absolute, buffer) {
  * a container. Returns the list of written files.
  */
 export async function runExport({ svgPath, smallPath = null, outDir, name, title = null, targets = TARGETS, force = false, render, workDir, log = () => {} }) {
+  outDir = resolveNamedPath(outDir).path;
+  svgPath = resolveInputFile(svgPath).path;
+  if (smallPath !== null) smallPath = resolveInputFile(smallPath).path;
   const safeName = sanitizeName(name);
   const safeTitle = cleanText(title ?? titleOrDefault(safeName));
   for (const target of targets) {

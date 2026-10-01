@@ -28,6 +28,7 @@ import {
   makeBmp,
   makeGif,
 } from './import-helpers.mjs';
+import { dirLinkSkipReason, makeAliasedTemp, makeDirLink, withCwd } from './helpers.mjs';
 
 // ---- detection, headers, caps ------------------------------------------------
 
@@ -124,16 +125,37 @@ test('a symbolic link to the image is refused', { skip: linkSkipReason }, () => 
   });
 });
 
-test('a symbolic link or junction anywhere in the directory chain is refused', { skip: linkSkipReason }, () => {
-  withTemp((dir) => {
-    const realDir = path.join(dir, 'real');
-    fs.mkdirSync(realDir);
-    writePng(path.join(realDir, 'x.png'), 4, 4, canvas(4, 4, [1, 2, 3, 255]));
-    const linked = path.join(dir, 'linked');
-    fs.symlinkSync(realDir, linked, 'junction');
-    assert.throws(() => loadSource(path.join(linked, 'x.png')), /symbolic link or junction/);
-    assert.equal(loadSource(path.join(realDir, 'x.png')).format, 'png');
-  });
+test('a link in the directories of the named image path is followed once, like macOS /var', { skip: dirLinkSkipReason }, () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    writePng(path.join(real, 'x.png'), 4, 4, canvas(4, 4, [1, 2, 3, 255]));
+    const source = loadSource(path.join(linked, 'x.png'));
+    assert.equal(source.format, 'png');
+    assert.equal(fs.realpathSync(path.dirname(source.path)), fs.realpathSync(real));
+    assert.ok(!source.path.split(path.sep).includes('alias'), `the reported path is the real one (${source.path})`);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a link planted inside the current folder is refused for the input image, and the real path is named', { skip: dirLinkSkipReason }, async () => {
+  const { base, real } = makeAliasedTemp();
+  try {
+    writePng(path.join(real, 'x.png'), 4, 4, canvas(4, 4, [1, 2, 3, 255]));
+    const project = path.join(base, 'project');
+    fs.mkdirSync(project);
+    makeDirLink(real, path.join(project, 'pictures'));
+    await withCwd(project, () => {
+      assert.throws(
+        () => loadSource(path.join(project, 'pictures', 'x.png')),
+        /pictures is a symbolic link or junction inside the current folder .*it points to .*pass that real path instead/,
+      );
+      assert.throws(() => loadSource(path.join('pictures', 'x.png')), /inside the current folder/);
+      assert.equal(loadSource(path.join(real, 'x.png')).format, 'png', 'the real path works');
+    });
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 // ---- the built-in GIF decoder ------------------------------------------------

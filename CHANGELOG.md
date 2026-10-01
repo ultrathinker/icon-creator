@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1]
+
+### Fixed
+- macOS: paths that go through the operating system's own links (`/var`, `/tmp`, `/etc` are links into
+  `/private`) were refused, so every write under the temp folder failed. A link in a path you name is now
+  followed once and the tool prints the real location it works in. A link inside the current folder (your
+  project, where a repository could ship one) is still refused, and the error names the real path to pass instead.
+  Links below an output folder, at the output file, at a staging file and hardlinks are refused as before.
+- The same link rule now covers every input path: the SVG to render, sheet, check or export, its small variant and
+  the imported image (a link outside the current folder is followed and reported, one inside is refused, and an input
+  file that is itself a link is refused). Before, only output paths were checked.
+- The test suite no longer exceeds its time on slow runners: tests that need a real browser render fewer sizes
+  and have generous per-process limits, and the CI job allows 30 minutes.
+
+### Changed
+- README, SECURITY.md and the skill describe the link behaviour exactly, and the platforms the CI covers.
+
 ## [0.2.0]
 
 ### Added

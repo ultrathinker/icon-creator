@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateSvg } from './svgcheck.mjs';
 import { encodePng, decodePng } from './png.mjs';
-import { assertRealParentChain, publishExclusive } from './publish.mjs';
+import { resolveOutputFile, resolveInputFile, publishExclusive } from './publish.mjs';
 import { renderSvgPng } from './renderers.mjs';
 
 export const DEFAULT_SHEET_SIZES = [256, 64, 32, 16];
@@ -98,6 +98,8 @@ export function composeSheet({ iconsByCell, sizes, backgrounds = SHEET_BACKGROUN
  * is ever cropped to fit its cell.
  */
 export async function renderSheet({ svgPaths, outPath, renderer, tempDir, sizes, backgrounds = SHEET_BACKGROUNDS, cell = SHEET_CELL, divider = SHEET_DIVIDER, force = false, render = null, log = () => {} }) {
+  outPath = resolveOutputFile(outPath).path;
+  svgPaths = svgPaths.map((svgPath) => resolveInputFile(svgPath).path);
   if (!force && fs.existsSync(outPath)) {
     throw new Error(`${outPath} already exists; pass --force to overwrite it`);
   }
@@ -110,7 +112,6 @@ export async function renderSheet({ svgPaths, outPath, renderer, tempDir, sizes,
   if (outStat !== null && outStat.isSymbolicLink()) {
     throw new Error(`${outPath} is a symbolic link: refusing to write through it`);
   }
-  assertRealParentChain(outPath);
   for (const svgPath of svgPaths) {
     const validation = validateSvg(fs.readFileSync(svgPath, 'utf8'), { label: svgPath });
     if (!validation.ok) {

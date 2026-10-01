@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { MAX_INPUT_BYTES, MAX_SIDE } from '../scripts/lib/imagefile.mjs';
 import { DEFAULT_TOLERANCE, BACKGROUND_MODES } from '../scripts/lib/importimg.mjs';
 import { planFiles, TARGETS } from '../scripts/lib/export.mjs';
+import { linkNote } from '../scripts/lib/publish.mjs';
 
 const read = (relative) => fs.readFileSync(path.resolve(relative), 'utf8').replace(/\r\n/g, '\n');
 // Prose wraps at 80 columns, so wording checks run on text with whitespace collapsed.
@@ -154,7 +155,7 @@ test('the skill and the command have valid front matter and the version is bumpe
   assert.match(COMMAND, /\$ARGUMENTS/);
   assert.match(SKILL, /^name: icon-creator$/m);
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
-  assert.equal(manifest.version, '0.2.0');
+  assert.equal(manifest.version, '0.2.1');
   assert.match(manifest.description, /your own image file/);
 });
 
@@ -302,4 +303,47 @@ test('the Tauri instruction lists only PNG, ICNS and ICO files and keeps the SVG
   assert.ok(!listed.some((rel) => rel.endsWith('.svg')), 'no SVG in the bundle.icon list');
   assert.deepEqual(listed.slice(0, 3).map((rel) => /hicolor\/(\d+)x/.exec(rel)[1]), ['32', '128', '256']);
   assert.match(aside, /belongs to a Linux icon-theme install, not to this list/);
+});
+
+// ---- CI fix round: links in named paths, and the CI job itself --------------
+
+test('the documents describe the link behaviour truthfully and the old absolute claims are gone', () => {
+  const readme = flat(README);
+  assert.match(readme, /\*\*Links in the paths you type\.\*\*/);
+  assert.match(readme, /macOS keeps `\/var`, `\/tmp` and `\/etc` as links into `\/private`/);
+  assert.match(readme, /follows such a link once, works in the real location and says so/);
+  assert.match(readme, /It refuses a link \*\*inside your current folder\*\*/);
+  assert.match(readme, /the error names the real path to pass instead/);
+  assert.match(readme, /Below an output folder it never follows a link/);
+  assert.match(flat(SECURITY), /links in the directories you name are followed once and reported, a link inside the current folder is refused/);
+  assert.match(SKILL_FLAT, /\*\*Paths and links\.\*\*/);
+  assert.match(SKILL_FLAT, /prints a line starting with `Note:` that names the real location/);
+  assert.match(SKILL_FLAT, /If a command is refused because a link lies INSIDE the current folder, the error names the real path/);
+  assert.match(AGENT_FLAT, /quote the real path from the error and stop, do not work around it/);
+  for (const [name, text] of [['README', readme], ['SECURITY', flat(SECURITY)], ['SKILL', SKILL_FLAT]]) {
+    assert.ok(!/no links in its path|reached through real directories|must not pass through a symbolic link|links and junctions are refused/.test(text), `${name} no longer claims every link is refused`);
+  }
+});
+
+test('the CLI note the documents quote is the note the tool prints', () => {
+  const note = linkNote('The output folder', { typed: '/tmp/icons', path: '/private/tmp/icons' });
+  assert.equal(note, 'Note: The output folder /tmp/icons goes through a symbolic link or junction; using its real location /private/tmp/icons.');
+  assert.match(flat(README), /`Note: \.\.\. goes through a symbolic link or junction; using its real location \.\.\.`/);
+});
+
+test('the CI job covers the three systems and both Node versions with room for slow runners', () => {
+  const workflow = read('.github/workflows/ci.yml');
+  assert.match(workflow, /os: \[ubuntu-latest, windows-latest, macos-latest\]/);
+  assert.match(workflow, /node: \[18, 22\]/);
+  const minutes = Number(/timeout-minutes: (\d+)/.exec(workflow)[1]);
+  assert.ok(minutes >= 30, `timeout-minutes is ${minutes}; the slow Windows runner needs at least 30`);
+});
+
+test('the link rule is documented for input paths as well as output paths', () => {
+  const readme = flat(README);
+  assert.match(readme, /This covers every path you name: the output folder or file, the SVG you render, sheet, check or export \(and its small variant\), and the image you import/);
+  assert.match(readme, /it never reads an input file that is itself a link/);
+  assert.match(SKILL_FLAT, /This applies to every path you pass - the SVG or image you read as well as the folder or file you write/);
+  assert.match(SKILL_FLAT, /A file that is itself a link is refused as an input/);
+  assert.match(flat(read('CHANGELOG.md')), /The same link rule now covers every input path/);
 });

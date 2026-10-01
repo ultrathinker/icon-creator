@@ -6,6 +6,7 @@ import path from 'node:path';
 import { discoverRenderers, noRendererMessage, renderPageHtml, verifyRenderedPng, renderSvgPng } from '../scripts/lib/renderers.mjs';
 import { renderSheet } from '../scripts/lib/sheet.mjs';
 import { encodePng } from '../scripts/lib/png.mjs';
+import { dirLinkSkipReason, makeDirLink, withCwd } from './helpers.mjs';
 
 function discoveryWith({ platform = 'win32', pathValue = '', files = [] }) {
   // `files` holds original-case paths; existence is matched case-insensitively.
@@ -215,44 +216,48 @@ test('renderSheet refuses a symbolic link at the output path', { skip: fileLinkS
   }
 });
 
-test('renderSvgPng refuses a symbolic link in the parent directory of the output', { skip: fileLinkSkipReason }, async () => {
+test('renderSvgPng refuses a link planted in the parent directory of the output inside the current folder', { skip: dirLinkSkipReason }, async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-guard-'));
   try {
     const outsideDir = path.join(base, 'outside-dir');
     fs.mkdirSync(outsideDir, { recursive: true });
-    fs.symlinkSync(outsideDir, path.join(base, 'redirect'));
-    await assert.rejects(
-      renderSvgPng({
-        svgPath: 'x.svg',
-        size: 16,
-        outPath: path.join(base, 'redirect', 'rendered.png'),
-        renderer: stubRenderer,
-        tempDir: base,
-      }),
-      /symbolic link or junction: refusing to write through it - pass the real path instead/,
-    );
+    makeDirLink(outsideDir, path.join(base, 'redirect'));
+    await withCwd(base, async () => {
+      await assert.rejects(
+        renderSvgPng({
+          svgPath: 'x.svg',
+          size: 16,
+          outPath: path.join(base, 'redirect', 'rendered.png'),
+          renderer: stubRenderer,
+          tempDir: base,
+        }),
+        /redirect is a symbolic link or junction inside the current folder .*refusing to write through it - it points to .*pass that real path instead/,
+      );
+    });
     assert.deepEqual(fs.readdirSync(outsideDir), []);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
 
-test('renderSheet refuses a symbolic link in the parent directory of the output', { skip: fileLinkSkipReason }, async () => {
+test('renderSheet refuses a link planted in the parent directory of the output inside the current folder', { skip: dirLinkSkipReason }, async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-guard-'));
   try {
     const outsideDir = path.join(base, 'outside-dir');
     fs.mkdirSync(outsideDir, { recursive: true });
-    fs.symlinkSync(outsideDir, path.join(base, 'redirect'));
-    await assert.rejects(
-      renderSheet({
-        svgPaths: ['a.svg'],
-        outPath: path.join(base, 'redirect', 'sheet.png'),
-        renderer: stubRenderer,
-        tempDir: base,
-        sizes: [16],
-      }),
-      /symbolic link or junction: refusing to write through it - pass the real path instead/,
-    );
+    makeDirLink(outsideDir, path.join(base, 'redirect'));
+    await withCwd(base, async () => {
+      await assert.rejects(
+        renderSheet({
+          svgPaths: ['a.svg'],
+          outPath: path.join(base, 'redirect', 'sheet.png'),
+          renderer: stubRenderer,
+          tempDir: base,
+          sizes: [16],
+        }),
+        /redirect is a symbolic link or junction inside the current folder .*pass that real path instead/,
+      );
+    });
     assert.deepEqual(fs.readdirSync(outsideDir), []);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });

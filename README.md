@@ -188,22 +188,38 @@ format specifications and verified by its own parsers plus a test suite.
   repository's own code; JPEG, WebP and BMP are decoded by the headless browser
   (so those three need Chrome, Chromium or Edge). Limits: 25 MB per file and
   8192 x 8192 px, checked from the file header before anything is decoded. The
-  file must be a regular file reached through real directories (links and
-  junctions are refused). Nothing inside the image is executed or fetched.
+  file must be a regular file and must not itself be a link. Nothing inside
+  the image is executed or fetched.
 - The tool writes only inside the output folder you name (plus its own
-  subfolder of the OS temp dir for scratch), never follows symbolic links or
-  junctions below the output root, and never overwrites an existing file
-  without `--force` (all write commands accept it). `export` additionally
-  refuses to write into a non-empty folder without `--force`, and the
-  `render`/`sheet`/`check` output path must not pass through a symbolic link
-  (give the real path instead).
+  subfolder of the OS temp dir for scratch) and never overwrites an existing
+  file without `--force` (all write commands accept it). `export` additionally
+  refuses to write into a non-empty folder without `--force`.
+- **Links in the paths you type.** This covers every path you name: the output
+  folder or file, the SVG you render, sheet, check or export (and its small
+  variant), and the image you import. A path may go through symbolic
+  links or junctions that lie outside your current folder: macOS keeps `/var`,
+  `/tmp` and `/etc` as links into `/private` (so `/tmp/icons` and the temp
+  folder just work), a project can sit behind a linked folder, and a Windows
+  folder can be a junction. The tool follows such a link once, works in the real
+  location and says so (`Note: ... goes through a symbolic link or junction;
+  using its real location ...`; for an input file the note names its folder). It
+  refuses a link **inside your current folder** (the project): a repository can ship a link such as `icon-work`
+  pointing somewhere else, so the error names the real path to pass instead.
+  Below an output folder it never follows a link, it never writes through a
+  link at the output file itself, at a staging file or through a hardlink, and
+  it never reads an input file that is itself a link. On
+  Linux and macOS a link you made inside your own project is therefore refused
+  until you pass its real path.
 - `.icns` output is built to the published Apple format but was not
   hand-verified inside Xcode on macOS here; `.ico` and the PNG tree were
   verified with independent tooling (Pillow) on Windows.
 - **Platforms:** developed and verified by running on Windows 11 (Chrome 154
-  and Edge). macOS and Linux renderer discovery and path handling are covered
-  by unit tests against simulated file systems but were not run on those
-  platforms here.
+  and Edge). The CI workflow in this repository runs the test suite on Ubuntu,
+  Windows and macOS with Node 18 and 22 (see the badge); its first run found the
+  macOS link problem and a slow-runner timeout that 0.2.1 fixes. macOS and Linux
+  renderer discovery and path handling are also covered by unit tests against
+  simulated file systems, and the macOS `/var` alias is reproduced in the tests
+  with a directory link.
 - The plugin never makes network requests, never reads environment variables
   beyond the standard program lookup `PATH`, and has no telemetry. The only
   files it reads are the SVGs and the one image file you name, plus what it
@@ -211,7 +227,7 @@ format specifications and verified by its own parsers plus a test suite.
 
 ## Development
 
-    node --test "tests/*.test.mjs"   # 180 tests: containers, discovery, export, SVG intake, image import, real renders
+    node --test "tests/*.test.mjs"   # 190+ tests: containers, discovery, export, SVG intake, image import, real renders
 
 (The glob keeps the run scoped to this folder's tests even if other
 `*.test.mjs` files exist elsewhere in the tree.)

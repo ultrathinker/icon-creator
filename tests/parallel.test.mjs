@@ -14,6 +14,10 @@ import { withTemp, writePng, glyphIcon, ringOnBackground } from './import-helper
 
 const CLI = path.resolve('scripts/icons.mjs');
 const FIXTURES = path.resolve('tests/fixtures');
+// Eight renders per export (the master and the Windows icon): the point is that
+// concurrent processes do not disturb each other, not how much they render, and
+// a slow CI runner needs seconds per browser launch.
+const ONLY = 'master,windows';
 const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
 const hasRenderer = discovery.chosen !== null;
 const rendererSkip = hasRenderer ? undefined : 'no renderer on this machine';
@@ -55,20 +59,20 @@ test('concurrent render, sheet, check and export commands produce exactly what a
     const clock = path.join(FIXTURES, 'clock.svg');
     const root = path.join(dir, 'icons'); // does not exist yet: the exports below create it concurrently
     const concurrent = await Promise.all([
-      runAsync(['export', terminal, '--out', path.join(root, 'app-1'), '--name', 'app']),
-      runAsync(['export', clock, '--out', path.join(root, 'app-2'), '--name', 'app']),
+      runAsync(['export', terminal, '--out', path.join(root, 'app-1'), '--name', 'app', '--only', ONLY]),
+      runAsync(['export', clock, '--out', path.join(root, 'app-2'), '--name', 'app', '--only', ONLY]),
       runAsync(['check', terminal, '--out', path.join(dir, 'check.png')]),
-      runAsync(['sheet', terminal, clock, '--out', path.join(dir, 'sheet.png')]),
+      runAsync(['sheet', terminal, clock, '--out', path.join(dir, 'sheet.png'), '--sizes', '32,16']),
       runAsync(['render', clock, '--size', '256', '--out', path.join(dir, 'clock-256.png')]),
     ]);
     for (const result of concurrent) assert.equal(result.code, 0, `${result.args.slice(0, 2).join(' ')} failed: ${result.stderr}`);
 
     // The same commands, run alone afterwards, must give byte-identical files.
-    const lone1 = await runAsync(['export', terminal, '--out', path.join(dir, 'lone-1'), '--name', 'app']);
-    const lone2 = await runAsync(['export', clock, '--out', path.join(dir, 'lone-2'), '--name', 'app']);
+    const lone1 = await runAsync(['export', terminal, '--out', path.join(dir, 'lone-1'), '--name', 'app', '--only', ONLY]);
+    const lone2 = await runAsync(['export', clock, '--out', path.join(dir, 'lone-2'), '--name', 'app', '--only', ONLY]);
     const loneRender = await runAsync(['render', clock, '--size', '256', '--out', path.join(dir, 'lone-clock-256.png')]);
     for (const result of [lone1, lone2, loneRender]) assert.equal(result.code, 0, result.stderr);
-    for (const relative of ['icon-1024.png', 'windows/app.ico', 'macos/app.icns', 'linux/hicolor/48x48/apps/app.png', 'web/icon-192.png']) {
+    for (const relative of ['icon-1024.png', 'icon.svg', 'windows/app.ico']) {
       assert.deepEqual(read(path.join(root, 'app-1', relative)), read(path.join(dir, 'lone-1', relative)), `app-1/${relative} (terminal)`);
       assert.deepEqual(read(path.join(root, 'app-2', relative)), read(path.join(dir, 'lone-2', relative)), `app-2/${relative} (clock)`);
     }

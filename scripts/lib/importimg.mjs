@@ -10,6 +10,7 @@ import { loadSource, decodeGifFirstFrame, assertDimensions } from './imagefile.m
 import { validateSvg } from './svgcheck.mjs';
 import { browserDecodeSize } from './renderers.mjs';
 import { sanitizeName, ensureRealDir, publishFile } from './export.mjs';
+import { resolveNamedPath } from './publish.mjs';
 import { borderReference, cornersUniform, cornerPixels, meanColor, removeBackground, resizeArea, fitToSquare } from './pixels.mjs';
 
 export const MASTER_SIZE = 1024;
@@ -344,6 +345,7 @@ export async function importImage({ srcPath, outDir, name, background = 'auto', 
   if (!BACKGROUND_MODES.includes(background)) {
     throw new Error(`--background must be one of ${BACKGROUND_MODES.join(', ')} (got "${background}")`);
   }
+  outDir = resolveNamedPath(outDir).path;
   const source = loadSource(srcPath);
   const outputs = [];
   let result;

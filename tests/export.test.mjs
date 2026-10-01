@@ -17,7 +17,7 @@ import {
 } from '../scripts/lib/export.mjs';
 import { parseIco } from '../scripts/lib/ico.mjs';
 import { parseIcns } from '../scripts/lib/icns.mjs';
-import { removeTree } from './helpers.mjs';
+import { removeTree, dirLinkSkipReason, makeAliasedTemp, makeDirLink, withCwd } from './helpers.mjs';
 
 const MASTER_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">' +
@@ -426,7 +426,7 @@ test('export through a hardlink replaces the entry, never the linked file', { sk
   });
 });
 
-test('export refuses a link in the ancestors of a new output root', { skip: linkSkipReason }, async () => {
+test('export refuses a link planted in the project folder above a new output root', { skip: linkSkipReason }, async () => {
   await withTempDir(async (dir) => {
     const master = path.join(dir, 'master.svg');
     fs.writeFileSync(master, MASTER_SVG);
@@ -434,20 +434,69 @@ test('export refuses a link in the ancestors of a new output root', { skip: link
     fs.mkdirSync(outside, { recursive: true });
     fs.symlinkSync(outside, path.join(dir, 'parent-link'), process.platform === 'win32' ? 'junction' : 'dir');
     const fake = makeFakeRenderer();
-    await assert.rejects(
-      runExport({
-        svgPath: master,
-        outDir: path.join(dir, 'parent-link', 'new-output'),
-        name: 'sample',
-        render: fake.render,
-        workDir: path.join(dir, 'work'),
-      }),
-      /symbolic link or junction: refusing to create output folders through it/,
-    );
+    // `dir` is the current folder, i.e. the user's project; the link lives inside it.
+    await withCwd(dir, async () => {
+      await assert.rejects(
+        runExport({
+          svgPath: master,
+          outDir: path.join(dir, 'parent-link', 'new-output'),
+          name: 'sample',
+          render: fake.render,
+          workDir: path.join(dir, 'work'),
+        }),
+        /parent-link is a symbolic link or junction inside the current folder .*it points to .*pass that real path instead/,
+      );
+    });
     assert.equal(fs.readdirSync(outside).length, 0, 'nothing may be created through the link');
     // Renders into the scratch work dir are fine; no output file may exist.
     assert.equal(fs.existsSync(path.join(dir, 'parent-link', 'new-output')), false);
   });
+});
+
+test('export works through a link in the path the user named and reports the real folder', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    const master = path.join(base, 'master.svg');
+    fs.writeFileSync(master, MASTER_SVG);
+    const result = await runExport({
+      svgPath: master,
+      outDir: path.join(linked, 'icons', 'sample'),
+      name: 'sample',
+      render: makeFakeRenderer().render,
+      workDir: path.join(base, 'work'),
+    });
+    assert.ok(fs.existsSync(path.join(real, 'icons', 'sample', 'windows', 'sample.ico')), 'files land in the real folder');
+    assert.equal(fs.realpathSync(result.outDir), fs.realpathSync(path.join(real, 'icons', 'sample')));
+    assert.ok(!result.outDir.split(path.sep).includes('alias'), `outDir is the real path (${result.outDir})`);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a link planted below the output folder is still refused when the folder itself is reached through a link', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    const master = path.join(base, 'master.svg');
+    fs.writeFileSync(master, MASTER_SVG);
+    const outside = path.join(base, 'outside');
+    fs.mkdirSync(outside);
+    fs.mkdirSync(path.join(real, 'out'));
+    makeDirLink(outside, path.join(real, 'out', 'web'));
+    await assert.rejects(
+      runExport({
+        svgPath: master,
+        outDir: path.join(linked, 'out'),
+        name: 'sample',
+        force: true,
+        render: makeFakeRenderer().render,
+        workDir: path.join(base, 'work'),
+      }),
+      /symbolic link or junction|outside the output folder/,
+    );
+    assert.deepEqual(fs.readdirSync(outside), [], 'nothing may be written through the planted link');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('text artifacts have the documented shape', () => {
@@ -521,6 +570,10 @@ test('a drawn master still gets every vector file and an empty skipped list', as
     });
     assert.equal(result.rasterMaster, false);
     assert.deepEqual(result.skipped, []);
-    assert.ok(result.files.some((file) => file.rel === 'icon.svg'));
+    const rels = result.files.map((file) => file.rel);
+    for (const vectorFile of ['icon.svg', 'web/favicon.svg', 'linux/scalable/apps/drawn.svg']) {
+      assert.ok(rels.includes(vectorFile), `${vectorFile} is written for a drawn master`);
+    }
+    assert.match(fs.readFileSync(path.join(dir, 'out', 'web', 'head.html'), 'utf8'), /favicon\.svg/);
   });
 });

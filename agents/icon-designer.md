@@ -17,7 +17,8 @@ images, preview) and, in `full` mode, `<root>/<name>-<k>/` (your icon set). Neve
 touch another icon's folder, `<root>/preview/` or anything else: the other
 agents run at the same time and the main agent assembles the shared results.
 Never ask the user questions; if something blocks you, stop and say so in your
-report. Use new file names (`check-2.png`) instead of `--force`, except for
+report (for example when a command is refused because a link lies inside the
+current folder: quote the real path from the error and stop, do not work around it). Use new file names (`check-2.png`) instead of `--force`, except for
 files you yourself created inside your own folders.
 
 ## The tool

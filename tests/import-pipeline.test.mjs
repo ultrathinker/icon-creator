@@ -32,6 +32,7 @@ import {
   writePng,
   makePng16,
 } from './import-helpers.mjs';
+import { dirLinkSkipReason, makeAliasedTemp, makeDirLink, withCwd } from './helpers.mjs';
 
 const WHITE = [255, 255, 255, 255];
 
@@ -328,16 +329,36 @@ test('importImage validates its options and the name', async () => {
   });
 });
 
-test('importImage refuses to create the output folder through a linked parent', { skip: linkSkipReason }, async () => {
-  await withTemp(async (dir) => {
-    const src = writePng(path.join(dir, 'a.png'), 64, 64, glyphIcon(64));
-    const outside = path.join(dir, 'outside');
-    fs.mkdirSync(outside);
-    const link = path.join(dir, 'link');
-    fs.symlinkSync(outside, link, 'junction');
-    await assert.rejects(importImage({ srcPath: src, outDir: path.join(link, 'icon-work'), name: 'a' }), /symbolic link or junction/);
-    assert.deepEqual(fs.readdirSync(outside), []);
-  });
+test('importImage works through a link in the named paths (macOS /var) and writes to the real folder', { skip: dirLinkSkipReason }, async () => {
+  const { base, real, linked } = makeAliasedTemp();
+  try {
+    writePng(path.join(real, 'a.png'), 64, 64, glyphIcon(64));
+    const result = await importImage({ srcPath: path.join(linked, 'a.png'), outDir: path.join(linked, 'icons', 'icon-work'), name: 'a' });
+    assert.deepEqual(fs.readdirSync(path.join(real, 'icons', 'icon-work')).sort(), ['a-master.png', 'a-master.svg']);
+    assert.ok(result.files.every((file) => !file.path.split(path.sep).includes('alias')), 'the reported files are in the real folder');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('importImage refuses to write through a link planted inside the current folder', { skip: dirLinkSkipReason }, async () => {
+  const { base, real } = makeAliasedTemp();
+  try {
+    const project = path.join(base, 'project');
+    fs.mkdirSync(project);
+    const src = writePng(path.join(project, 'a.png'), 64, 64, glyphIcon(64));
+    makeDirLink(real, path.join(project, 'icon-work'));
+    await withCwd(project, async () => {
+      await assert.rejects(
+        importImage({ srcPath: src, outDir: path.join(project, 'icon-work'), name: 'a' }),
+        /icon-work is a symbolic link or junction inside the current folder/,
+      );
+      await assert.rejects(importImage({ srcPath: src, outDir: 'icon-work', name: 'a' }), /inside the current folder/);
+    });
+    assert.deepEqual(fs.readdirSync(real), [], 'nothing was written through the link');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('an SVG source is validated and copied unchanged; an unsafe one is refused', async () => {
