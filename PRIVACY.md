@@ -17,7 +17,9 @@ This plugin runs entirely on your machine and collects nothing.
 - **What it runs:** the bundled Node scripts, and a renderer it finds on your
   machine (Chrome, Chromium, Edge, resvg, rsvg-convert, Inkscape or
   ImageMagick). Browsers are launched headless with a throwaway profile under
-  the OS temp dir; command-line renderers are invoked once per render with
+  the OS temp dir, and the tool ends the browser it started (with its helper
+  processes) as soon as the screenshot is complete, or when the tool is
+  interrupted; command-line renderers are invoked once per render with
   the input file and an output path. No window opens and no code from the SVG
   input is executed. To decode a JPEG, WebP or BMP you name, the headless
   browser opens that one file through its local `file://` URL and shows it as

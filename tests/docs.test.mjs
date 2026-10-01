@@ -140,6 +140,8 @@ test('the privacy-relevant documents say the plugin reads the one image file the
   assert.match(flat(PRIVACY), /the one image file you name for the `import` command/);
   assert.match(flat(PRIVACY), /never run, and nothing in it is fetched/);
   assert.match(flat(PRIVACY), /it makes no network requests/);
+  assert.match(flat(PRIVACY), /the tool ends the browser it started/);
+  assert.match(flat(README), /ends every browser it started/);
   assert.match(flat(SECURITY), /the one image file you give to `import`/);
   assert.match(SKILL_FLAT, /the one image file the user named for `import`/);
   assert.match(flat(README), /The only files it reads are the SVGs and the one image file you name/);
@@ -155,7 +157,7 @@ test('the skill and the command have valid front matter and the version is bumpe
   assert.match(COMMAND, /\$ARGUMENTS/);
   assert.match(SKILL, /^name: icon-creator$/m);
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
-  assert.equal(manifest.version, '0.2.1');
+  assert.equal(manifest.version, '0.2.2');
   assert.match(manifest.description, /your own image file/);
 });
 

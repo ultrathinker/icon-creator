@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.2]
+
+### Fixed
+- macOS: a headless Chrome sometimes keeps running for a long time after its screenshot is complete, and the tool
+  waited for the process to exit (45 s per render), which made the macOS CI job hang. The tool now waits for the
+  screenshot instead: once the output file is a complete PNG of unchanged size it ends the browser and carries on.
+  The total time limit and the retry on a fresh profile are kept.
+- The whole browser is ended, not just the process that was started: on macOS and Linux the browser runs in its own
+  process group and the group is ended; on Windows the process tree is ended. A browser still running when the tool
+  exits or is interrupted (Ctrl-C, a terminate request, a closed terminal) is ended as well. This covers every command
+  that starts a browser: `render`, `sheet`, `check`, `import`, `doctor` and `export`.
+
+### Added
+- Tests with a fake browser that writes a valid PNG and then keeps running with a helper process of its own: a render
+  must return quickly and leave nothing running; a browser that never writes still times out and is retried; a
+  half-written file is not accepted; a browser left running when the program exits is ended.
+
 ## [0.2.1]
 
 ### Fixed

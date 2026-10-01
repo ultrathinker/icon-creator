@@ -172,7 +172,9 @@ format specifications and verified by its own parsers plus a test suite.
   rsvg-convert, Inkscape or ImageMagick. No npm packages, ever.
 - Browsers are launched headless with a throwaway profile under the OS temp
   dir; command-line renderers are invoked directly with the input and output
-  paths. No window ever opens.
+  paths. No window ever opens. The tool ends every browser it started (the
+  browser and the helper processes it spawned) as soon as its screenshot is
+  complete, and also if the tool itself is interrupted.
 - SVG input (drawn by Claude or supplied by you) must be self-contained: square viewBox,
   no scripts, no external or file references, `data:` URLs limited to raster
   image types (png/jpeg/gif/webp/bmp - embedded SVG is rejected), and no
@@ -216,7 +218,8 @@ format specifications and verified by its own parsers plus a test suite.
 - **Platforms:** developed and verified by running on Windows 11 (Chrome 154
   and Edge). The CI workflow in this repository runs the test suite on Ubuntu,
   Windows and macOS with Node 18 and 22 (see the badge); its first run found the
-  macOS link problem and a slow-runner timeout that 0.2.1 fixes. macOS and Linux
+  macOS link problem and a slow-runner timeout that 0.2.1 fixes; 0.2.2 fixes a
+  macOS hang caused by a headless Chrome that outlives its screenshot. macOS and Linux
   renderer discovery and path handling are also covered by unit tests against
   simulated file systems, and the macOS `/var` alias is reproduced in the tests
   with a directory link.

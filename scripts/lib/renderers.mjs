@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { runBrowser } from './browserproc.mjs';
 import { pathToFileURL } from 'node:url';
 import { validateSvg } from './svgcheck.mjs';
 import { pngInfo, decodePng, analyzeRgba } from './png.mjs';
@@ -309,35 +310,52 @@ async function screenshotPage({ html, width, height, outPath, renderer, tempDir,
   fs.writeFileSync(htmlPath, html, 'utf8');
   fs.rmSync(outPath, { force: true });
 
-  // The chrome.exe launcher may exit immediately after handing the command
-  // line to a de-elevated child (observed on Windows when the caller is
-  // elevated): the launcher exits in ~100 ms and the child writes the
-  // screenshot ~500 ms later. The exit code says nothing, so the output file
-  // is the only signal that matters — poll for it after the process ends.
-  const waitForPng = async (deadlineMs) => {
-    const deadline = Date.now() + deadlineMs;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(outPath)) {
+  // The result is the output file, not the browser's exit: on a real MacBook
+  // headless Chrome sometimes keeps running for a long time after the
+  // screenshot is complete. The probe accepts the file once it is a complete
+  // PNG (ends with IEND) whose size is the same on two consecutive polls while
+  // the browser still runs; runBrowser then ends the whole browser at once. A
+  // browser that has already exited needs no second poll. (A chrome.exe
+  // launcher may also exit right after handing over to a de-elevated child
+  // that writes the file ~500 ms later - runBrowser keeps polling for that.)
+  const makeProbe = () => {
+    let lastSize = -1;
+    return async ({ exited }) => {
+      let bytes;
+      try {
+        bytes = fs.readFileSync(outPath);
+      } catch {
+        lastSize = -1;
+        return null;
+      }
+      // A complete file ends with the IEND chunk; the IHDR alone appears long
+      // before a large screenshot has been written out.
+      const complete = bytes.length >= 8 && bytes.subarray(bytes.length - 8).equals(PNG_IEND);
+      let info = null;
+      if (complete) {
         try {
-          const bytes = fs.readFileSync(outPath);
-          const info = pngInfo(bytes);
-          // A complete file ends with the IEND chunk; the IHDR alone appears
-          // long before a large screenshot has been written out.
-          if (bytes.length >= 8 && bytes.subarray(bytes.length - 8).equals(PNG_IEND)) {
-            if (info.width === width && info.height === height) return null;
-            return `wrote a ${info.width}x${info.height} PNG (wanted ${width}x${height})`;
-          }
-        } catch (error) {
-          // The file may still be mid-write; keep polling.
+          info = pngInfo(bytes);
+        } catch {
+          info = null;
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-    return 'wrote no screenshot';
+      if (info === null) {
+        lastSize = -1;
+        return null;
+      }
+      if (!exited && bytes.length !== lastSize) {
+        lastSize = bytes.length;
+        return null;
+      }
+      if (info.width === width && info.height === height) return { problem: null };
+      return { problem: `wrote a ${info.width}x${info.height} PNG (wanted ${width}x${height})` };
+    };
   };
 
   const attempt = async (profileDir) => {
+    fs.rmSync(outPath, { force: true });
     const args = [
+      ...(renderer.prefixArgs || []),
       '--headless',
       '--disable-gpu',
       '--hide-scrollbars',
@@ -353,9 +371,10 @@ async function screenshotPage({ html, width, height, outPath, renderer, tempDir,
       `--screenshot=${path.resolve(outPath)}`,
       pathToFileURL(htmlPath).href,
     ];
-    const result = await runHidden(renderer.path, args);
+    const result = await runBrowser(renderer.path, args, { probe: makeProbe(), ...(renderer.timing || {}) });
     if (result.error) return result.error;
-    return waitForPng(result.timedOut ? 1000 : 20000);
+    if (result.verdict !== null) return result.verdict.problem;
+    return 'wrote no screenshot';
   };
 
   let problem = await attempt(path.join(tempDir, 'browser-profile'));
