@@ -1,0 +1,14 @@
+{
+  "name": "icon-creator",
+  "owner": {
+    "name": "ultrathinker"
+  },
+  "description": "Turn a plain-language app description into a finished cross-platform icon set.",
+  "plugins": [
+    {
+      "name": "icon-creator",
+      "source": ".",
+      "description": "Design an app icon as SVG, or bring your own image, check it at real sizes, and export the Windows, macOS, Linux and web icon set."
+    }
+  ]
+}
