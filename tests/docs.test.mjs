@@ -73,21 +73,22 @@ for (const [label, text] of [['SKILL.md', SKILL], ['README.md', README]]) {
   });
 }
 
-test('the skill asks question 0 alone, with the owner-specified wording and options', () => {
-  assert.match(SKILL_FLAT, /\*\*Should I draw the icon for you or use your own image file\?\*\*/);
-  assert.match(SKILL_FLAT, /`Draw one for me`/);
-  assert.match(SKILL_FLAT, /`Use my image file`/);
+test('the skill asks question 0 alone, with the three ways in as its options', () => {
+  assert.match(SKILL_FLAT, /\*\*Should I draw the icon for you, use your own image file, or choose from a folder of your images\?\*\* \(header `Mode`\)/);
+  assert.match(SKILL_FLAT, /Options: `Draw one for me`, `Use my image file` and `Choose from a folder of images`/);
   assert.match(SKILL_FLAT, /in its own `AskUserQuestion` call/);
   assert.match(SKILL_FLAT, /Skip question 0\*\* when the command argument or the user's message already/);
   assert.match(SKILL_FLAT, /path to an existing image file/);
-  assert.match(COMMAND_FLAT, /Should I draw the icon for you or use your own image file\?/);
-  assert.match(COMMAND_FLAT, /`Draw one for me`/);
-  assert.match(COMMAND_FLAT, /`Use my image file`/);
+  assert.match(SKILL_FLAT, /a path to an existing folder \(check that it is a folder\) -> folder mode/);
+  assert.match(SKILL_FLAT, /an existing image file -> file mode, an existing folder -> folder mode/);
+  assert.match(COMMAND_FLAT, /Should I draw the icon for you, use your own image file, or choose from a folder of your images\?/);
+  for (const option of ['`Draw one for me`', '`Use my image file`', '`Choose from a folder of images`']) assert.ok(COMMAND_FLAT.includes(option), option);
   assert.match(COMMAND_FLAT, /no question about how many icons and no approval step/);
+  assert.match(COMMAND_FLAT, /a path to an existing folder \(folder mode\)/);
 });
 
 test('file mode asks only the location question and builds exactly one icon at once', () => {
-  const rawFile = section(SKILL, '## File mode', '## Draw mode');
+  const rawFile = section(SKILL, '## File mode', '## Folder mode');
   const file = flat(rawFile);
   assert.match(file, /Exactly ONE icon, and the full set right away/);
   assert.match(file, /Do not ask how many icons and do not ask for approval first/);
@@ -157,8 +158,11 @@ test('the skill and the command have valid front matter and the version is bumpe
   assert.match(COMMAND, /\$ARGUMENTS/);
   assert.match(SKILL, /^name: icon-creator$/m);
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
-  assert.equal(manifest.version, '0.2.2');
-  assert.match(manifest.description, /your own image file/);
+  assert.equal(manifest.version, '1.0.0');
+  assert.match(manifest.description, /your own image file, or a folder of your pictures/);
+  const market = JSON.parse(read('.claude-plugin/marketplace.json'));
+  assert.match(market.plugins[0].description, /choose the best of a folder of your pictures/);
+  assert.match(read('CHANGELOG.md'), /^## \[1\.0\.0\]$/m);
 });
 
 // ---- several icons: the fifth question and parallel subagents --------------
@@ -177,7 +181,7 @@ test('the fifth question is asked only for two or more icons, in a second call, 
   assert.match(draw, /Skip it when N is 1, or when the user already said how/);
   assert.match(draw, /File mode never asks this/);
   // The file-mode section must not mention the fifth question or subagents at all.
-  const file = flat(section(SKILL, '## File mode', '## Draw mode'));
+  const file = flat(section(SKILL, '## File mode', '## Folder mode'));
   assert.ok(!/How should I make the different icons|subagent/i.test(file));
 });
 
@@ -254,7 +258,7 @@ test('README and the command describe the fifth question and the parallel option
 // ---- review 13: SVG sources and the wiring instructions ---------------------
 
 test('the skill, command and README treat an SVG source differently from a raster source', () => {
-  const file = flat(section(SKILL, '## File mode', '## Draw mode'));
+  const file = flat(section(SKILL, '## File mode', '## Folder mode'));
   assert.match(file, /If the file is an SVG, everything about the raster master is different/);
   assert.match(file, /ONE file, `icon-work\/my-app-master\.svg` \(no PNG, no background handling, none of the warning codes below\)/);
   assert.match(file, /ALL files are written, including `icon\.svg`, `web\/favicon\.svg` and `linux\/scalable\/apps\/<name>\.svg`/);
@@ -348,4 +352,111 @@ test('the link rule is documented for input paths as well as output paths', () =
   assert.match(SKILL_FLAT, /This applies to every path you pass - the SVG or image you read as well as the folder or file you write/);
   assert.match(SKILL_FLAT, /A file that is itself a link is refused as an input/);
   assert.match(flat(read('CHANGELOG.md')), /The same link rule now covers every input path/);
+});
+
+// ---- 1.0: folder mode, pack.mjs and svg.mjs ----------------------------------
+
+const FOLDER_REF = read('skills/icon-creator/references/folder-mode.md');
+const SVG_REF = read('skills/icon-creator/references/svg-step.md');
+
+/** The subcommands and flags a script's --help names. */
+function helpOf(script) {
+  const text = spawnSync(process.execPath, [path.resolve(`scripts/${script}`), '--help'], { encoding: 'utf8', windowsHide: true }).stdout;
+  return { text, flags: new Set(text.match(/--[a-z][a-z-]*/g)) };
+}
+const PACK_HELP = helpOf('pack.mjs');
+const SVG_HELP = helpOf('svg.mjs');
+const SCRIPT_RULES = {
+  'pack.mjs': { help: PACK_HELP, required: { ingest: ['--from', '--run'], build: ['--run'], sheet: ['--run'] } },
+  'svg.mjs': { help: SVG_HELP, required: { doctor: [], measure: ['--run', '--number'], check: ['--run', '--number', '--svg'], pack: ['--run', '--number', '--svg'] } },
+};
+
+/** Every `pack.mjs <command> ...` and `svg.mjs <command> ...` invocation shown in a text. */
+function scriptInvocations(text) {
+  return [...text.matchAll(/(pack|svg)\.mjs"?\s+([a-z]+)([^\n`]*)/g)].map((match) => ({
+    script: `${match[1]}.mjs`,
+    subcommand: match[2],
+    flags: match[3].match(/--[a-z][a-z-]*/g) ?? [],
+    line: match[0],
+  }));
+}
+
+for (const [label, text] of [['SKILL.md', SKILL], ['references/folder-mode.md', FOLDER_REF], ['references/svg-step.md', SVG_REF], ['README.md', README]]) {
+  test(`${label}: every pack.mjs and svg.mjs command uses a real subcommand, real flags and its required flags`, () => {
+    for (const { script, subcommand, flags, line } of scriptInvocations(text)) {
+      const rules = SCRIPT_RULES[script];
+      assert.ok(Object.hasOwn(rules.required, subcommand), `unknown ${script} subcommand in: ${line}`);
+      for (const flag of flags) assert.ok(rules.help.flags.has(flag), `unknown flag ${flag} in: ${line}`);
+      // A command written out in a code block carries its required flags; prose mentions such as `build --only` do not.
+      if (/^(pack|svg)\.mjs"/.test(line)) {
+        for (const required of rules.required[subcommand]) assert.ok(flags.includes(required), `${required} missing in: ${line}`);
+      }
+    }
+  });
+}
+
+test('folder mode asks only the location and the pick, and builds a pack for every picture', () => {
+  const raw = section(SKILL, '## Folder mode', '## Draw mode');
+  const folder = flat(raw);
+  assert.match(folder, /Do not ask how many icons \(it is the number of pictures\) and do not ask for approval first/);
+  assert.match(folder, /Ask ONLY the location question\*\*, exactly as in F2 \(header `Location`\)/);
+  assert.match(folder, /\*\*Which candidate should become your icon\?\*\* \(header `Pick`\)/);
+  for (const forbidden of ['Which icon should I create', 'How many different icons', 'Show the icons for approval first', 'subagent']) {
+    assert.ok(!folder.includes(forbidden), `folder mode must not mention: ${forbidden}`);
+  }
+  const shown = scriptInvocations(raw).map((c) => `${c.script} ${c.subcommand}`);
+  assert.deepEqual(shown.slice(0, 3), ['pack.mjs ingest', 'pack.mjs build', 'pack.mjs sheet']);
+  assert.match(folder, /relay the skipped files with their reasons/);
+  assert.match(folder, /each list shows at most 50 entries, `counts` has the totals/);
+  assert.match(folder, /give `ingest` and `build` a long timeout \(10 minutes\) or run them in the background/);
+  assert.match(folder, /writes the full detail to `<run>\/build-<n>\.json`/);
+  assert.match(folder, /With only one usable candidate there is nothing to choose/);
+  assert.match(folder, /the picture's file name as its description/);
+  assert.match(folder, /until `notTaken` is empty\) and ask once, after reading all the sheets/);
+  assert.match(folder, /`build --only <new numbers>` with the same `--title`/);
+  assert.match(SKILL_FLAT, /is a mistyped path, never a description: say so and ask for the path again/);
+  assert.match(SKILL_FLAT, /still ask question 0 \(unless the request already decides the mode\), go on only with folder mode/);
+  assert.match(folder, /read it before G3/);
+  assert.match(folder, /Only when the user asks for it, read `references\/svg-step\.md`/);
+  assert.match(folder, /Never pass `--force` to redo what exists/);
+  assert.match(SKILL_FLAT, /Folder mode does not ask it either/);
+});
+
+test('the skill names both reference pages, and the folder-mode page explains every pack warning code', () => {
+  assert.ok(SKILL.includes('`references/folder-mode.md`'));
+  assert.ok(SKILL.includes('`references/svg-step.md`'));
+  const codes = [...read('scripts/lib/packbuild.mjs').matchAll(/code: '([a-z0-9-]+)'/g)].map((m) => m[1]);
+  assert.ok(codes.length >= 8, `found codes: ${codes}`);
+  for (const code of new Set(codes)) assert.ok(FOLDER_REF.includes(`\`${code}\``), `${code} is explained in references/folder-mode.md`);
+  for (const field of ['`counts`', '`added`', '`skipped`', '`already`', '`notTaken`', '`ignored`', '`subfolders`', '`recordProblems`']) {
+    assert.ok(FOLDER_REF.includes(field), `the ingest field ${field} is explained`);
+  }
+  assert.match(flat(SVG_REF), /a redrawn copy, not the picture traced/);
+  assert.match(flat(SVG_REF), /`close` up to 2 %, `near` up to 6 %, else `off`/);
+});
+
+test('the documents say what folder mode reads and that the pictures are only read', () => {
+  assert.match(SKILL_FLAT, /the pictures directly inside the folder the user named for `ingest` \(only its own files, never its subfolders or links/);
+  assert.match(SKILL_FLAT, /every other file is opened to see whether it is a picture, and of one that is not, only its first 4 KB are read/);
+  assert.match(SKILL_FLAT, /the pictures are only read, never changed, moved or deleted/);
+  assert.match(flat(PRIVACY), /the pictures directly inside the folder you name for `pack\.mjs ingest`/);
+  assert.match(flat(PRIVACY), /your pictures are only read, never changed, moved or deleted/);
+  assert.match(flat(PRIVACY), /a SHA-256 of its bytes/);
+  assert.match(flat(PRIVACY), /every other file there is opened to see whether it is a picture, and of one that is not, only its first 4 KB are read/);
+  assert.match(flat(PRIVACY), /the names of the files that were skipped and why, at most 50/);
+  assert.match(flat(SECURITY), /the pictures directly inside the folder you give to `pack\.mjs ingest`/);
+  assert.match(flat(README), /in folder mode, the files directly inside the folder you name: the first 4 KB of each to see whether it is a picture, and the pictures themselves/);
+  assert.match(flat(README), /Of a file that is not a picture it reads only the first 4 KB/);
+  assert.match(flat(README), /Your pictures are only read: never changed, moved or deleted/);
+});
+
+test('the shipped words describe a local tool: no image generation and no keys', () => {
+  const shipped = ['skills/icon-creator/SKILL.md', 'skills/icon-creator/references/folder-mode.md', 'skills/icon-creator/references/svg-step.md',
+    'commands/icon.md', 'agents/icon-designer.md', 'README.md', 'PRIVACY.md', 'SECURITY.md', '.claude-plugin/plugin.json',
+    '.claude-plugin/marketplace.json', ...fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs')).map((f) => `scripts/${f}`),
+    ...fs.readdirSync('scripts/lib').map((f) => `scripts/lib/${f}`)];
+  for (const file of shipped) {
+    const text = flat(read(file));
+    assert.ok(!/image generator|image model|generate (an |the )?images?\b|api[ _-]?keys?\b|user_config/i.test(text), `${file} speaks of image generation or keys`);
+  }
 });

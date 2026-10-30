@@ -1,6 +1,6 @@
-// Pixel operations on 8-bit RGBA buffers for the image import: background
-// removal by flood fill from the edges, anti-aliased edge cleaning, area
-// average downscaling and square fitting. Pure functions, no file access.
+// Pixel operations on 8-bit RGBA buffers: background removal by flood fill
+// from the edges, anti-aliased edge cleaning, area-average downscaling and
+// square fitting. Pure functions, no file access.
 
 /** Largest per-channel difference between two RGB triples. */
 function channelDistance(r1, g1, b1, r2, g2, b2) {
@@ -47,6 +47,39 @@ export function borderReference(rgba, width, height) {
   for (const bucket of buckets.values()) if (best === null || bucket.count > best.count) best = bucket;
   if (best === null) return null;
   return { r: Math.round(best.r / best.count), g: Math.round(best.g / best.count), b: Math.round(best.b / best.count) };
+}
+
+/**
+ * A flat background that does not show in all four corners: the subject may touch the image edge (even a corner), and
+ * a JPEG may be noisy. The dominant colour of the border is the background when at least 60 % of the opaque border
+ * pixels are within `tolerance` of it and the rest are clearly something else (more than twice the tolerance away:
+ * a subject touching the edge), not a gradient drifting away from it. Returns { reference, share } or null.
+ */
+export function borderBackground(rgba, width, height, tolerance) {
+  const reference = borderReference(rgba, width, height);
+  if (reference === null) return null;
+  let total = 0;
+  let near = 0;
+  let far = 0;
+  const visit = (x, y) => {
+    const o = (y * width + x) * 4;
+    if (rgba[o + 3] < 245) return;
+    total += 1;
+    const distance = channelDistance(rgba[o], rgba[o + 1], rgba[o + 2], reference.r, reference.g, reference.b);
+    if (distance <= tolerance) near += 1;
+    else if (distance > 2 * tolerance) far += 1;
+  };
+  for (let x = 0; x < width; x += 1) {
+    visit(x, 0);
+    visit(x, height - 1);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    visit(0, y);
+    visit(width - 1, y);
+  }
+  if (total === 0 || near < 0.6 * total) return null;
+  if (far < 0.8 * (total - near)) return null;
+  return { reference, share: near / total };
 }
 
 /** True when all four corners are opaque and within `tolerance` of each other. */
@@ -218,6 +251,160 @@ export function removeBackground(rgba, width, height, reference, tolerance) {
   return { rgba: out, transparent, softened };
 }
 
+const EDGE_INK_MAX = 60; // an outline pixel: every channel at most this, and (nearly) opaque
+const EDGE_INK_ALPHA = 200;
+const EDGE_OFF_LINE = 48; // how far from the "background to outline colour" line a halo pixel may be (JPEG noise)
+const EDGE_REACHED = 255;
+
+/** The width, in pixels, of the band along the outline that cleanDarkEdge looks at: 0.4 % of the image, 3 to 10 px. */
+export function edgeBand(width, height) {
+  return Math.max(3, Math.min(10, Math.round(Math.min(width, height) / 256)));
+}
+
+/**
+ * Breadth-first spread over the 8 neighbours of `passable` pixels from `seeds`, at most `limit` steps (so the band is
+ * about as wide along a diagonal as along a row).
+ * Returns the step count per pixel (EDGE_REACHED = not reached) and, when `track` is set, the seed each pixel came from.
+ */
+function spread(width, height, seeds, passable, limit, track) {
+  const total = width * height;
+  const distance = new Uint8Array(total).fill(EDGE_REACHED);
+  const source = track ? new Int32Array(total) : null;
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+  for (const seed of seeds) {
+    distance[seed] = 0;
+    if (source !== null) source[seed] = seed;
+    queue[tail] = seed;
+    tail += 1;
+  }
+  while (head < tail) {
+    const index = queue[head];
+    head += 1;
+    const step = distance[index];
+    if (step >= limit) continue;
+    const x = index % width;
+    const y = (index - x) / width;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= height) continue;
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const xx = x + dx;
+        if (xx < 0 || xx >= width || (dx === 0 && dy === 0)) continue;
+        const next = yy * width + xx;
+        if (distance[next] !== EDGE_REACHED || !passable[next]) continue;
+        distance[next] = step + 1;
+        if (source !== null) source[next] = source[index];
+        queue[tail] = next;
+        tail += 1;
+      }
+    }
+  }
+  return { distance, source };
+}
+
+/**
+ * Take the light halo off a dark outline. A picture is cut out of its background by a flood fill, and the
+ * blur at the edge of the outline (the drawing's own, or JPEG's) is wider than the two fringe layers removeBackground un-mixes,
+ * so a pale rim is left outside a black outline. This finds the pixels that lie between the transparent outside and a
+ * dark outline pixel, within one band of the outside and within two bands of the outline (reached from each without
+ * crossing the other or any outline pixel), keeps only
+ * those close to the line between the removed background colour and the outline colour (a plain blend, not paint),
+ * and turns each into that outline colour with the coverage of the blend as its alpha. Nothing changes when the
+ * there is no dark outline, or where the edge is not next to one: a pale outer border wider than three bands, a glow
+ * of another colour (a neon icon on a dark background), a coloured fill, the inside of the outline.
+ *
+ * `rgba` is the picture after removeBackground and `reference` the background colour it removed.
+ * Returns { rgba, cleaned, band } with `cleaned` the number of pixels changed.
+ */
+export function cleanDarkEdge(rgba, width, height, reference) {
+  const total = width * height;
+  const band = edgeBand(width, height);
+  const out = Buffer.from(rgba);
+  const unchanged = { rgba: out, cleaned: 0, band };
+
+  const visible = new Uint8Array(total);
+  const ink = new Uint8Array(total);
+  let inkCount = 0;
+  for (let index = 0; index < total; index += 1) {
+    const o = index * 4;
+    if (rgba[o + 3] > 0) visible[index] = 1;
+    if (rgba[o + 3] >= EDGE_INK_ALPHA && rgba[o] <= EDGE_INK_MAX && rgba[o + 1] <= EDGE_INK_MAX && rgba[o + 2] <= EDGE_INK_MAX) {
+      ink[index] = 1;
+      inkCount += 1;
+    }
+  }
+  if (inkCount === 0) return unchanged;
+
+  // Passable: a visible pixel that is not outline. Seeds: the transparent pixels and the outline pixels that touch one.
+  const passable = new Uint8Array(total);
+  for (let index = 0; index < total; index += 1) passable[index] = visible[index] === 1 && ink[index] === 0 ? 1 : 0;
+  const outsideSeeds = [];
+  const inkSeeds = [];
+  for (let index = 0; index < total; index += 1) {
+    const x = index % width;
+    const y = (index - x) / width;
+    let touchesPassable = false;
+    for (let dy = -1; dy <= 1 && !touchesPassable; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx >= 0 && xx < width && yy >= 0 && yy < height && passable[yy * width + xx] === 1) {
+          touchesPassable = true;
+          break;
+        }
+      }
+    }
+    if (!touchesPassable) continue;
+    if (visible[index] === 0) outsideSeeds.push(index);
+    else if (ink[index] === 1) inkSeeds.push(index);
+  }
+  if (outsideSeeds.length === 0 || inkSeeds.length === 0) return unchanged;
+  const fromOutside = spread(width, height, outsideSeeds, passable, band, false);
+  const fromInk = spread(width, height, inkSeeds, passable, band * 2, true);
+
+  let cleaned = 0;
+  for (let index = 0; index < total; index += 1) {
+    if (passable[index] === 0 || fromOutside.distance[index] === EDGE_REACHED || fromInk.distance[index] === EDGE_REACHED) continue;
+    const o = index * 4;
+    const seed = fromInk.source[index] * 4;
+    const inkR = rgba[seed];
+    const inkG = rgba[seed + 1];
+    const inkB = rgba[seed + 2];
+    // The colour as seen on the removed background, so a partly transparent pixel is judged by what it looks like.
+    const k = rgba[o + 3] / 255;
+    const er = rgba[o] * k + reference.r * (1 - k);
+    const eg = rgba[o + 1] * k + reference.g * (1 - k);
+    const eb = rgba[o + 2] * k + reference.b * (1 - k);
+    const lr = inkR - reference.r;
+    const lg = inkG - reference.g;
+    const lb = inkB - reference.b;
+    const span = lr * lr + lg * lg + lb * lb;
+    const pr = er - reference.r;
+    const pg = eg - reference.g;
+    const pb = eb - reference.b;
+    const coverage = Math.min(1, Math.max(0, (pr * lr + pg * lg + pb * lb) / span));
+    const offR = pr - coverage * lr;
+    const offG = pg - coverage * lg;
+    const offB = pb - coverage * lb;
+    if (Math.hypot(offR, offG, offB) > EDGE_OFF_LINE) continue; // paint of another colour, not a blend of background and outline
+    if (coverage < 0.04) {
+      out[o] = 0;
+      out[o + 1] = 0;
+      out[o + 2] = 0;
+      out[o + 3] = 0;
+    } else {
+      out[o] = inkR;
+      out[o + 1] = inkG;
+      out[o + 2] = inkB;
+      out[o + 3] = coverage >= 0.98 ? 255 : Math.round(255 * coverage);
+    }
+    cleaned += 1;
+  }
+  return { rgba: out, cleaned, band };
+}
+
 /**
  * Area-average (box filter) resize in premultiplied alpha, so transparent
  * pixels never bleed colour into the edges. Intended for shrinking; equal
@@ -308,4 +495,53 @@ export function fitToSquare(rgba, width, height, maxSize) {
     padded: contentWidth !== size || contentHeight !== size,
     downscaled: scale !== 1,
   };
+}
+
+/** Renderings up to this many px get a light sharpening after the shrink (see shrinkForIcon). */
+export const SHARPEN_MAX_SIZE = 48;
+/** Strength of that sharpening: measured on real candidates, 0.5 crisps eyes and edges at 16/32 px, 1.0 starts to halo. */
+export const SHARPEN_AMOUNT = 0.5;
+
+/**
+ * Unsharp mask on the colour of a small square rendering: out = c + amount * (c - blur3x3(c)), the blur weighted by
+ * alpha so transparent pixels never pull colour into an edge. Alpha is never changed (no halo outside the shape) and
+ * fully transparent pixels stay as they are.
+ */
+export function sharpenSmall(rgba, size, amount = SHARPEN_AMOUNT) {
+  const out = Buffer.from(rgba);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const o = (y * size + x) * 4;
+      if (rgba[o + 3] === 0) continue;
+      for (let channel = 0; channel < 3; channel += 1) {
+        let sum = 0;
+        let weight = 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= size || yy >= size) continue;
+            const q = (yy * size + xx) * 4;
+            const w = (rgba[q + 3] / 255) * (dx === 0 && dy === 0 ? 4 : dx === 0 || dy === 0 ? 2 : 1);
+            sum += rgba[q + channel] * w;
+            weight += w;
+          }
+        }
+        const blur = weight > 0 ? sum / weight : rgba[o + channel];
+        out[o + channel] = Math.max(0, Math.min(255, Math.round(rgba[o + channel] + amount * (rgba[o + channel] - blur))));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Shrink a square master to `size` px for an icon file: the area-average resize, and for the small sizes (up to
+ * SHARPEN_MAX_SIZE px) a light sharpening on top, because a box filter softens a 16 or 32 px rendering. A size equal to
+ * the master is the master itself, untouched. `sharpen: false` gives the plain resize.
+ */
+export function shrinkForIcon(rgba, sourceSize, size, { sharpen = true } = {}) {
+  const small = resizeArea(rgba, sourceSize, sourceSize, size, size);
+  if (!sharpen || size >= sourceSize || size > SHARPEN_MAX_SIZE) return small;
+  return sharpenSmall(small, size);
 }

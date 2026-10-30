@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for looking. This plugin is small on purpose: a skill, a command, one agent file and one dependency-free
-Node script. Please keep it that way: no runtime packages, no network access, nothing that writes outside the
+Thanks for looking. This plugin is small on purpose: a skill (with two reference pages), a command, one agent file and three
+dependency-free Node scripts (`icons.mjs`, `pack.mjs`, `svg.mjs`). Please keep it that way: no runtime packages, no network access, nothing that writes outside the
 output folder the user names.
 
 ## Development setup
@@ -20,6 +20,11 @@ synthetic data only: tests build their images and SVGs themselves or use the tin
   pull request.
 - Do not add binary files other than PNG, JPEG, GIF, WebP or SVG, and keep every file under 256 KiB.
 - Run `claude plugin validate .` if you have Claude Code installed.
+
+## Releases
+
+A release is made from the files git tracks only (a snapshot of `git ls-files`), never by packing the working folder:
+ignored working folders such as `docs/` and `_docs/` must not ship.
 
 ## Reporting problems
 

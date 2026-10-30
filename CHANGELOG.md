@@ -5,6 +5,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0]
+
+### Added
+- A third way in: choose from a folder of your pictures. `pack.mjs ingest` takes the pictures of a folder in as
+  numbered candidates (PNG, JPEG and GIF read built in, WebP and BMP through the headless browser; the pictures are
+  only read), `build` writes a finished icon pack for every candidate and `sheet` draws contact sheets with each
+  candidate on light and dark at 64, 32 and 16 px. The skill reads the sheets, recommends two or three by number and
+  asks which one you want. Running `ingest` again after you add pictures takes in only the new ones, numbered on.
+  `build` prints a short summary per candidate and keeps the full detail in `build-<n>.json`. A link in the path of
+  the picture folder or the run folder follows the same rule as every other path: outside the current folder it is
+  followed once and a `Note:` line says so, inside it is refused.
+- The SVG step for the candidate you pick: `svg.mjs measure` prints the shapes, colours and symmetry to draw by,
+  `check` compares the drawing with the picture (mismatch figures and a difference image), and `pack` builds its set
+  with `icon.svg`, `web/favicon.svg` and the scalable Linux icon.
+- Question 0 has a third option, `Choose from a folder of images`; a folder path given to `/icon` starts folder mode
+  directly.
+- `import` takes off the pale rim a removed background can leave outside a dark outline (`--no-edge-clean` keeps it).
+
+### Changed
+- A baseline JPEG is decoded by the plugin's own code, so importing one no longer needs a browser; progressive and
+  CMYK JPEGs still go through it. A JPEG that stores RGB instead of YCbCr is recognised the way libjpeg does it.
+- The PNG reader limits the decompressed data to what the image's own dimensions need.
+- The skill keeps the details of folder mode and the SVG step in `skills/icon-creator/references/`, read only when
+  that mode is used.
+
+Nothing leaves your machine in any mode: no network requests, no accounts, no keys.
+
 ## [0.2.2]
 
 ### Fixed

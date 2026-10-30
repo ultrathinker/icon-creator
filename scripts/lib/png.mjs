@@ -209,9 +209,10 @@ export function decodePng(buffer) {
   if (info.colorType === 3 && palette === null) throw new Error('Palette PNG without a PLTE chunk');
   let raw;
   try {
-    raw = zlib.inflateSync(Buffer.concat(idat));
+    // At most what the header declares: a few hundred KB of zlib can otherwise inflate to gigabytes.
+    raw = zlib.inflateSync(Buffer.concat(idat), { maxOutputLength: info.height * (info.width * channels + 1) });
   } catch (error) {
-    throw new Error(`PNG pixel data does not decompress: ${error.message}`);
+    throw new Error(`PNG pixel data does not decompress (or holds more than its header declares): ${error.message}`);
   }
   const rows = unfilter(raw, info.width, info.height, channels);
   const rgba = expandToRgba(rows, info.width, info.height, info.colorType, palette, transparency);

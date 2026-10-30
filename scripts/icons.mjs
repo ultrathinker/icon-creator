@@ -30,7 +30,10 @@ Usage
       Options: --background auto|keep|remove (default auto: keep a
       transparent background, remove a plain one, keep and warn otherwise),
       --tolerance 0-120 (colour distance counted as background, default
-      ${DEFAULT_TOLERANCE}), --force (overwrite).
+      ${DEFAULT_TOLERANCE}), --no-edge-clean (keep the pale rim a removed
+      background can leave outside a dark outline; by default it is taken
+      off), --force (overwrite). PNG, GIF and baseline JPEG are decoded
+      built in; WebP, BMP and other JPEGs need a headless browser.
 
   node icons.mjs render <file.svg> --size <px> --out <file.png>
       Render one SVG to a transparent PNG of exactly that pixel size and
@@ -248,7 +251,7 @@ async function importCommand(options) {
   try {
     noteLinks('The image file is in', srcPath, { file: true });
     noteLinks('The output folder', options.out);
-    // The browser is only needed for JPEG, WebP and BMP: find it on demand.
+    // The browser is only needed for WebP, BMP and the rare JPEG or PNG the built-in decoders refuse: find it on demand.
     const browserDecode = async ({ imagePath, width, height }) => {
       const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
       const renderer = pickRenderer(discovery, options.renderer);
@@ -261,6 +264,7 @@ async function importCommand(options) {
       name: options.name,
       background,
       tolerance,
+      edgeClean: !options['no-edge-clean'],
       force: Boolean(options.force),
       browserDecode,
     });

@@ -3,17 +3,20 @@
 [![ci](https://github.com/ultrathinker/icon-creator/actions/workflows/ci.yml/badge.svg)](https://github.com/ultrathinker/icon-creator/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Describe your app in one sentence, or bring an image you already have; get a
-reviewed, ready-to-wire icon set for Windows, macOS, Linux and the web. The
-plugin's skill either has Claude draw SVG concepts or prepares your own image
-file (a PNG from an image generator, a JPEG, a WebP...), renders it with the
-browser you already have, looks at it at real sizes (down to 16 px), and then a
-deterministic script exports every file your project needs. Nothing is
-downloaded and no packages are installed: the whole toolchain is Node 18+
-standard library plus a local renderer.
+Describe your app in one sentence, bring an image you already have, or point at
+a folder of pictures to choose from; get a reviewed, ready-to-wire icon set for
+Windows, macOS, Linux and the web. The plugin's skill has Claude draw SVG
+concepts, prepares your own image file (a PNG, a JPEG, a WebP...), or builds a
+finished pack for every picture in your folder and shows them side by side at
+64, 32 and 16 px so you can pick the one that still reads when it is small. It
+looks at the result at real sizes, and deterministic scripts write every file
+your project needs. Nothing is downloaded, nothing leaves your machine and no
+packages are installed: the whole toolchain is Node 18+ standard library plus a
+local renderer.
 
     /icon a timer app for focus sessions
     /icon C:\art\my-logo.png
+    /icon C:\art\icon-ideas
 
 ## Install
 
@@ -23,7 +26,8 @@ In Claude Code:
     /plugin install icon-creator@icon-creator
 
 Then restart the session (or run `/reload-plugins`) and ask for an icon, or run `/icon-creator:icon`.
-You need Node 18 or newer and one of Chrome, Chromium or Edge; see "Requirements and limits" below.
+You need Node 18 or newer and one of Chrome, Chromium or Edge (folder mode needs the browser only for WebP and BMP
+pictures and for its SVG step); see "Requirements and limits" below.
 
 ## What lands in your output folder
 
@@ -44,18 +48,30 @@ source, so `icon.svg`, `web/favicon.svg` and `linux/scalable/apps/<name>.svg`
 are **not** written (the export says so) and `head.html` does not link a
 favicon.svg. Everything else is produced as above.
 
-## Two ways in: draw it or bring it
+## Three ways in: draw it, bring it, or choose from a folder
 
-The first question, asked alone, is **"Should I draw the icon for you or use
-your own image file?"** (typing a file path as the answer counts as choosing
-the file). It is skipped when your command or message already contains a path
-to an image file or a description of an icon.
+The first question, asked alone, is **"Should I draw the icon for you, use
+your own image file, or choose from a folder of your images?"** (typing a file
+or folder path as the answer counts as choosing it). It is skipped when your
+command or message already contains a path to an image file or a folder, or a
+description of an icon.
+
+| Way in | You give | You get |
+|---|---|---|
+| Draw one for me | a sentence, or nothing (the current project or a random subject) | SVG concepts drawn by Claude, the full set of the ones you keep, editable `icon.svg` |
+| Use my image file | one PNG, JPEG, WebP, GIF, BMP or SVG | its background handled, the full set at once |
+| Choose from a folder of images | a folder of pictures (8, 16, ... up to 64 per round) | a finished pack for every picture, contact sheets at 64/32/16 px, a recommendation, the one you pick (optionally redrawn as SVG) |
 
 - **Use my image file:** one more question (where to put the folder), then
   exactly one icon and the full set right away - no "how many", no approval
   step. The skill still looks at the prepared result on a light and a dark
   background, runs the 16 px check, and tells you what it saw and any warning.
   See "Your own image" below.
+- **Choose from a folder of images:** one more question (where to put the
+  results), then every picture becomes a numbered candidate with its own
+  finished pack, and contact sheets show them all side by side. Claude reads
+  the sheets, recommends two or three by number and asks which one you want.
+  See "A folder of pictures" below.
 - **Draw one for me:** the four questions and the design loop below. When you
   ask for two or more icons, a fifth question follows: make them **one by one**
   in the conversation (the default: simpler, fewer tokens) or **in parallel, one
@@ -130,13 +146,15 @@ detected from the file's content, never from its extension.
   artwork touching the edge, background removal that ate most of the picture,
   opaque corners (every export target needs transparent corners, so the export
   refuses such a master), and a 16 px result that is mush.
+- **The pale rim** a removed background can leave outside a dark outline is
+  taken off (`--no-edge-clean` keeps it); the import says how much.
 - **Corrupt or truncated files are refused**, not turned into a blank or
   garbled master: PNG chunks are checked against their CRC, GIF data must
   produce every pixel, and JPEG, WebP and BMP files must be complete by their
   own structure (end marker, declared size, pixel rows); the browser must also
   report that it decoded the picture. A JPEG with damaged colour data inside an
-  otherwise complete file is decoded by the browser as best it can and is not
-  detectable without a full decoder - look at the result.
+  otherwise complete file can still decode with visible errors - look at the
+  result.
 
 Honest limits of the raster route: it cannot get a hand-drawn small variant
 (when 16 px fails the options are to accept it, supply a simpler image, or let
@@ -144,8 +162,58 @@ the icon be drawn as SVG instead); sizes above the source's own resolution are
 enlarged and look soft; background removal is a flood fill for plain
 backgrounds, not an AI matte, and will not rescue a photo or a gradient
 background; EXIF and colour-profile metadata is not interpreted by the tool
-(the browser that decodes JPEG/WebP/BMP may still apply an embedded colour
-profile); an animated GIF contributes only its first frame.
+(the browser that decodes WebP, BMP and the rarer JPEG variants may still apply
+an embedded colour profile); an animated GIF contributes only its first frame.
+
+## A folder of pictures
+
+    node scripts/pack.mjs ingest --from C:\art\icon-ideas --run icons/candidates
+    node scripts/pack.mjs build --run icons/candidates --name my-app --title "My App"
+    node scripts/pack.mjs sheet --run icons/candidates
+
+- **`ingest`** opens the files directly inside the folder (never its
+  subfolders or links; names starting with a dot and the system files
+  `Thumbs.db`, `desktop.ini` and `.DS_Store` are not opened), in natural name
+  order (`img2` before `img10`), and stores each picture as `candidate-<k>.png`
+  in the run folder, shrunk to 1024 px when it is larger. Of a file that is not
+  a picture it reads only the first 4 KB, and lists its name with the reason.
+  PNG, GIF (first frame) and baseline JPEG are decoded by this repository's own
+  code; WebP, BMP and the rarer JPEG variants need the headless browser. Each
+  picture has the same limits as `import` (25 MB, 8192 x 8192 px); pictures
+  under 64 px, documents, SVGs (use `import` for those) and duplicates are
+  skipped, each with its reason. Your pictures are only read: never changed,
+  moved or deleted. The run folder records which picture became which number
+  (with a SHA-256 of its bytes) and the names of the files skipped, so running
+  `ingest` again after you add pictures takes in only the new ones, numbered
+  after the others. At most 64 new pictures per call; the JSON lists the rest
+  (each list at most 50 names, with the totals in `counts`). The run folder must
+  be new, empty or made by `ingest`, and never the picture folder itself.
+- **`build`** writes `pack-<k>/` for every candidate: the same files as an
+  export from a raster image (see the table above, with the master named
+  `icon-<size>.png`), plus `web/icon-maskable-512.png`. Each picture is cropped
+  to its subject so it fills the square (`--fill`, `--no-crop`, `--keep-tile`),
+  a plain background is removed, the pale rim a cut-out leaves outside a dark
+  outline is cleaned (`--no-edge-clean`) and the 16-48 px sizes get a light
+  sharpening (`--no-sharpen`). It prints a short summary per candidate
+  (warning codes such as a background that was kept, an edge that fades on dark
+  or light, a small master) and writes the full detail to `build-<n>.json` in
+  the run folder.
+- **`sheet`** writes `sheet-<n>.png`, eight candidates per sheet, each on a
+  checkerboard and a dark tile with its true-size 64, 32 and 16 px renderings
+  and an "SVG" badge that estimates how well it would redraw as a vector.
+- `--only 5-12` builds or sheets just the candidates of a later round (new
+  sheet files, the old ones untouched); `--variant <label>` builds another look
+  of the same candidates beside the first one. Nothing existing is overwritten
+  without `--force`, and nothing is written outside the run folder.
+
+**The SVG step (optional, for the one you pick).** A pack made from a picture
+has no vector files. On request Claude redraws the chosen candidate as an SVG:
+`node scripts/svg.mjs measure` prints the shapes, colours and symmetry to draw
+by, `check` renders the drawing and compares it with the picture
+(`mismatchPercent`, a side-by-side difference image), and `pack` builds
+`pack-<k>-svg/` from the drawing with `icon.svg`, `web/favicon.svg` and the
+scalable Linux icon. It is a redrawn copy, not a trace: cleaner edges, no soft
+shadows or gradients. Drawing and checking need a renderer; `measure` does not.
 
 ## The script behind the skill
 
@@ -155,6 +223,8 @@ profile); an animated GIF contributes only its first frame.
     node scripts/icons.mjs sheet a.svg b.svg --out sheet.png
     node scripts/icons.mjs check icon.svg --out check.png
     node scripts/icons.mjs export icon.svg --out icons --name my-app
+    node scripts/pack.mjs ingest --from pictures --run candidates   # folder mode, see above
+    node scripts/svg.mjs doctor                                     # the SVG step, see above
 
 Rendering uses a headless Chromium-family browser (Chrome, Chromium, Edge)
 found in standard install locations or on PATH; if none exists it falls back
@@ -169,7 +239,9 @@ format specifications and verified by its own parsers plus a test suite.
 ## Requirements and limits
 
 - **Node 18 or newer** and one renderer: Chrome, Chromium, Edge, resvg,
-  rsvg-convert, Inkscape or ImageMagick. No npm packages, ever.
+  rsvg-convert, Inkscape or ImageMagick. No npm packages, ever. Folder mode
+  works without a renderer for PNG, JPEG and GIF pictures; WebP and BMP
+  pictures and the SVG step need one.
 - Browsers are launched headless with a throwaway profile under the OS temp
   dir; command-line renderers are invoked directly with the input and output
   paths. No window ever opens. The tool ends every browser it started (the
@@ -186,19 +258,21 @@ format specifications and verified by its own parsers plus a test suite.
   Letters must be drawn as paths. Every render must come out with transparent
   corners - full-bleed square icons are rejected with a fix hint, because the
   containers expect a transparent background.
-- Raster input goes through `import` only. PNG and GIF are decoded by this
-  repository's own code; JPEG, WebP and BMP are decoded by the headless browser
-  (so those three need Chrome, Chromium or Edge). Limits: 25 MB per file and
-  8192 x 8192 px, checked from the file header before anything is decoded. The
-  file must be a regular file and must not itself be a link. Nothing inside
-  the image is executed or fetched.
+- Raster input goes through `import` (one file) or `pack.mjs ingest` (a folder).
+  PNG, GIF and baseline JPEG are decoded by this repository's own code; WebP,
+  BMP and the rarer JPEG variants (progressive, CMYK) are decoded by the
+  headless browser (so those need Chrome, Chromium or Edge). Limits: 25 MB per
+  file and 8192 x 8192 px, checked from the file header before anything is
+  decoded. The file must be a regular file and must not itself be a link.
+  Nothing inside the image is executed or fetched.
 - The tool writes only inside the output folder you name (plus its own
   subfolder of the OS temp dir for scratch) and never overwrites an existing
   file without `--force` (all write commands accept it). `export` additionally
   refuses to write into a non-empty folder without `--force`.
 - **Links in the paths you type.** This covers every path you name: the output
   folder or file, the SVG you render, sheet, check or export (and its small
-  variant), and the image you import. A path may go through symbolic
+  variant), and the image you import (or the folder of pictures you take in,
+  and the run folder). A path may go through symbolic
   links or junctions that lie outside your current folder: macOS keeps `/var`,
   `/tmp` and `/etc` as links into `/private` (so `/tmp/icons` and the temp
   folder just work), a project can sit behind a linked folder, and a Windows
@@ -225,12 +299,14 @@ format specifications and verified by its own parsers plus a test suite.
   with a directory link.
 - The plugin never makes network requests, never reads environment variables
   beyond the standard program lookup `PATH`, and has no telemetry. The only
-  files it reads are the SVGs and the one image file you name, plus what it
-  generated itself. See [PRIVACY.md](PRIVACY.md).
+  files it reads are the SVGs and the one image file you name (in folder mode,
+  the files directly inside the folder you name: the first 4 KB of each to see
+  whether it is a picture, and the pictures themselves), plus what it generated
+  itself. See [PRIVACY.md](PRIVACY.md).
 
 ## Development
 
-    node --test "tests/*.test.mjs"   # 190+ tests: containers, discovery, export, SVG intake, image import, real renders
+    node --test "tests/*.test.mjs"   # 340+ tests: containers, discovery, export, SVG intake, image import, folder intake, packs, sheets, the SVG step, real renders
 
 (The glob keeps the run scoped to this folder's tests even if other
 `*.test.mjs` files exist elsewhere in the tree.)

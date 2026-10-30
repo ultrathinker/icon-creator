@@ -1,8 +1,8 @@
 {
   "name": "icon-creator",
   "displayName": "Icon Creator",
-  "version": "0.2.2",
-  "description": "Turn a plain-language app description, or your own image file, into a finished cross-platform icon set: reviewed at real sizes through headless-browser renders, exported as Windows .ico, macOS .icns, the Linux hicolor tree, web favicons and master files.",
+  "version": "1.0.0",
+  "description": "Turn a plain-language app description, your own image file, or a folder of your pictures into a finished cross-platform icon set: reviewed at real sizes, candidates compared side by side at 64/32/16 px, exported as Windows .ico, macOS .icns, the Linux hicolor tree, web favicons and master files.",
   "author": {
     "name": "ultrathinker"
   },
@@ -14,6 +14,7 @@
   "privacyPolicyUrl": "https://github.com/ultrathinker/icon-creator/blob/main/PRIVACY.md",
   "keywords": [
     "icons",
+    "app-icons",
     "svg",
     "favicon",
     "windows",

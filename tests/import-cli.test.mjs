@@ -41,7 +41,7 @@ function masterPng(dir, name) {
 
 test('import prepares a white-background PNG and prints the measured facts', () => {
   withTemp((dir) => {
-    const src = writePng(path.join(dir, 'gemini.png'), 200, 200, ringOnBackground(200, [255, 255, 255, 255]));
+    const src = writePng(path.join(dir, 'artwork.png'), 200, 200, ringOnBackground(200, [255, 255, 255, 255]));
     const out = path.join(dir, 'icon-work');
     const { code, stdout, stderr } = runCli(['import', src, '--out', out, '--name', 'ring']);
     assert.equal(code, 0, stderr);
@@ -119,12 +119,12 @@ test('import decodes the first frame of a GIF without a browser and says it was 
   });
 });
 
-test('import decodes a JPEG through the browser and removes its white background', { skip: browserSkip }, () => {
+test('import decodes a baseline JPEG with the built-in decoder (no browser) and removes its white background', () => {
   withTemp((dir) => {
     const out = path.join(dir, 'o');
     const { code, stdout, stderr } = runCli(['import', path.join(FIXTURES, 'import-white.jpg'), '--out', out, '--name', 'photo']);
     assert.equal(code, 0, stderr);
-    assert.match(stdout, /JPEG, 96x96 px.*fully opaque; decoded by browser/);
+    assert.match(stdout, /JPEG, 96x96 px.*fully opaque; decoded by built-in JPEG decoder/);
     assert.match(stdout, /Background: mode auto -> remove/);
     const master = masterPng(out, 'photo');
     assert.deepEqual(analyzeRgba(master.width, master.height, master.rgba).cornerAlphas, [0, 0, 0, 0]);

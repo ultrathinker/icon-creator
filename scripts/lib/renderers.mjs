@@ -191,7 +191,7 @@ export function noRendererMessage() {
     'No SVG renderer found.',
     'I looked for Chrome, Chromium and Edge (well-known install locations and PATH),',
     'then for resvg, rsvg-convert, inkscape and magick on PATH.',
-    'Install Google Chrome (https://www.google.com/chrome/) or Microsoft Edge,',
+    'Install Google Chrome or Microsoft Edge,',
     'or one of the command-line renderers above, then run "doctor" again.',
   ].join('\n');
 }

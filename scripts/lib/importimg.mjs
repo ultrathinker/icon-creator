@@ -11,7 +11,8 @@ import { validateSvg } from './svgcheck.mjs';
 import { browserDecodeSize } from './renderers.mjs';
 import { sanitizeName, ensureRealDir, publishFile } from './export.mjs';
 import { resolveNamedPath } from './publish.mjs';
-import { borderReference, cornersUniform, cornerPixels, meanColor, removeBackground, resizeArea, fitToSquare } from './pixels.mjs';
+import { borderReference, cornersUniform, cornerPixels, meanColor, removeBackground, cleanDarkEdge, resizeArea, fitToSquare } from './pixels.mjs';
+import { decodeJpeg } from './jpeg.mjs';
 
 export const MASTER_SIZE = 1024;
 export const DEFAULT_TOLERANCE = 32;
@@ -26,6 +27,9 @@ const EDGE_MARGIN = 0.01; // artwork closer than this share of the side to an ed
 const HEAVY_REMOVAL = 0.75; // share of pixels removed that makes us suspicious
 const MUSH_INK = 0.12; // visible share at 16 px below which little is left
 const MUSH_CONTRAST = 10; // luminance spread at 16 px below which it is a blob
+
+/** How the formats are written in messages. */
+const FORMAT_NAMES = { png: 'PNG', jpeg: 'JPEG', gif: 'GIF', webp: 'WebP', bmp: 'BMP' };
 
 function luminance(r, g, b) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -46,8 +50,10 @@ function toWorkingSize(decoded) {
 /**
  * Decode the loaded source to RGBA. PNG goes through the built-in codec
  * (anything it cannot handle, such as 16-bit or interlaced files, falls back
- * to the browser), GIF through the built-in first-frame decoder, JPEG/WebP/BMP
- * through `browserDecode({ imagePath, width, height })`.
+ * to the browser), GIF through the built-in first-frame decoder, a baseline
+ * JPEG through the built-in JPEG decoder (progressive, CMYK and other JPEG
+ * variants it refuses fall back to the browser), WebP/BMP through
+ * `browserDecode({ imagePath, width, height })`.
  */
 export async function decodeSource(source, { browserDecode = null } = {}) {
   const { format, buffer, width, height, path: file } = source;
@@ -65,16 +71,26 @@ export async function decodeSource(source, { browserDecode = null } = {}) {
     } catch (error) {
       throw new Error(`${file} is not a readable GIF: ${error.message}`);
     }
+  } else if (format === 'jpeg') {
+    try {
+      const decoded = decodeJpeg(buffer);
+      return toWorkingSize({ width: decoded.width, height: decoded.height, rgba: decoded.rgba, via: 'built-in JPEG decoder', frames: 1 });
+    } catch (error) {
+      // A progressive, CMYK or 12-bit JPEG is refused by the built-in decoder: the browser can still read it.
+      if (browserDecode === null) {
+        throw new Error(`${file} is a JPEG the built-in decoder cannot read (${error.message}); a headless browser (Chrome, Chromium or Edge) can, but none is available`);
+      }
+    }
   }
   if (browserDecode === null) {
-    throw new Error(`decoding ${format.toUpperCase()} needs a headless browser (Chrome, Chromium or Edge); none is available`);
+    throw new Error(`decoding ${FORMAT_NAMES[format] ?? format} needs a headless browser (Chrome, Chromium or Edge); none is available`);
   }
   const decoded = await browserDecode({ imagePath: file, width, height });
   const expected = browserDecodeSize(width, height);
   if (decoded.width !== expected.width || decoded.height !== expected.height) {
     throw new Error(`the browser decoded ${file} as ${decoded.width}x${decoded.height}, expected ${expected.width}x${expected.height}`);
   }
-  assertDimensions(decoded.width, decoded.height, `the decoded ${format.toUpperCase()}`);
+  assertDimensions(decoded.width, decoded.height, `the decoded ${FORMAT_NAMES[format] ?? format}`);
   return { width: decoded.width, height: decoded.height, rgba: decoded.rgba, via: 'browser', frames: 1 };
 }
 
@@ -151,7 +167,7 @@ function smallSizeMetrics(master, size) {
  * Prepare the raster master from decoded pixels: background handling, square
  * fit, measurements and honest warnings. Pure (no file access).
  */
-export function prepareMaster({ decoded, background = 'auto', tolerance = DEFAULT_TOLERANCE, sourceWidth, sourceHeight }) {
+export function prepareMaster({ decoded, background = 'auto', tolerance = DEFAULT_TOLERANCE, edgeClean = true, sourceWidth, sourceHeight }) {
   const { width, height } = decoded;
   const warnings = [];
   const total = width * height;
@@ -169,11 +185,18 @@ export function prepareMaster({ decoded, background = 'auto', tolerance = DEFAUL
   let pixels = decoded.rgba;
   let transparent = 0;
   let softened = 0;
+  let edgeCleaned = 0;
   if (choice.action === 'remove') {
     const result = removeBackground(decoded.rgba, width, height, choice.reference, tolerance);
     pixels = result.rgba;
     transparent = result.transparent;
     softened = result.softened;
+    // The cut-out can leave a pale rim outside a dark outline, which shows on a dark background: take it off.
+    if (edgeClean) {
+      const edge = cleanDarkEdge(pixels, width, height, choice.reference);
+      pixels = edge.rgba;
+      edgeCleaned = edge.cleaned;
+    }
     if (transparent / total > HEAVY_REMOVAL) {
       warnings.push({
         code: 'removal-heavy',
@@ -271,6 +294,7 @@ export function prepareMaster({ decoded, background = 'auto', tolerance = DEFAUL
       cornerAlphaAfter: analysis.cornerAlphas,
       madeTransparentPercent: percent(transparent, total),
       softenedPercent: percent(softened, total),
+      edgeCleanedPercent: percent(edgeCleaned, total),
       fit: { size: fit.size, content: fit.content, padded: fit.padded, downscaled: fit.downscaled },
       ink: { visibleRatio: analysis.visibleRatio, bbox: analysis.bbox },
       small16: small,
@@ -313,6 +337,9 @@ export function describeImport(result) {
       (f.softenedPercent > 0 ? ` (plus ${f.softenedPercent.toFixed(1)}% edge pixels made partly transparent)` : '') +
       '.',
   );
+  if (f.edgeCleanedPercent > 0) {
+    lines.push(`Pale rim outside the dark outline taken off: ${f.edgeCleanedPercent.toFixed(2)}% of the pixels (--no-edge-clean keeps it).`);
+  }
   lines.push(
     `Fit: ${f.fit.padded ? `padded to a ${f.fit.size}x${f.fit.size} square (picture ${f.fit.content.width}x${f.fit.content.height}, centred)` : `already square, ${f.fit.size}x${f.fit.size}`}` +
       `${f.fit.downscaled ? `, shrunk from ${f.sourceWidth}x${f.sourceHeight}` : ', not resized'}.`,
@@ -335,9 +362,9 @@ export function describeImport(result) {
  * existing file is never replaced without `force`, and every write goes
  * through the same link-safe publication as the export.
  * `browserDecode({ imagePath, width, height })` is needed only for
- * JPEG/WebP/BMP (and the rare PNG the built-in codec cannot read).
+ * WebP/BMP (and the rare PNG or JPEG the built-in decoders cannot read).
  */
-export async function importImage({ srcPath, outDir, name, background = 'auto', tolerance = DEFAULT_TOLERANCE, force = false, browserDecode = null }) {
+export async function importImage({ srcPath, outDir, name, background = 'auto', tolerance = DEFAULT_TOLERANCE, edgeClean = true, force = false, browserDecode = null }) {
   const safeName = sanitizeName(name);
   if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > MAX_TOLERANCE) {
     throw new Error(`--tolerance must be a number from 0 to ${MAX_TOLERANCE} (got ${tolerance})`);
@@ -364,6 +391,7 @@ export async function importImage({ srcPath, outDir, name, background = 'auto', 
       decoded,
       background,
       tolerance,
+      edgeClean,
       sourceWidth: source.width,
       sourceHeight: source.height,
     });

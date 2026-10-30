@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { decodePng, analyzeRgba, encodePng } from '../scripts/lib/png.mjs';
 import { loadSource } from '../scripts/lib/imagefile.mjs';
+import { PROGRESSIVE_JPEG } from './jpeg-fixtures.mjs';
 import { resizeArea, fitToSquare, removeBackground, cornerPixels } from '../scripts/lib/pixels.mjs';
 import {
   prepareMaster,
@@ -18,6 +19,11 @@ import {
   describeImport,
   DEFAULT_TOLERANCE,
 } from '../scripts/lib/importimg.mjs';
+
+function writeBytes(file, buffer) {
+  fs.writeFileSync(file, buffer);
+  return file;
+}
 import { validateSvg } from '../scripts/lib/svgcheck.mjs';
 import { isRasterMaster } from '../scripts/lib/export.mjs';
 import {
@@ -247,7 +253,7 @@ test('a non-square picture is fitted, not stretched, in the prepared master', ()
 
 // ---- decoding sources and the full import -----------------------------------
 
-test('decodeSource uses the built-in codecs for PNG and GIF and the injected browser for the rest', async () => {
+test('decodeSource uses the built-in codecs for PNG, GIF and baseline JPEG and the injected browser for the rest', async () => {
   await withTemp(async (dir) => {
     const pngFile = writePng(path.join(dir, 'a.png'), 8, 8, canvas(8, 8, [9, 8, 7, 255]));
     const png = await decodeSource(loadSource(pngFile), { browserDecode: null });
@@ -258,16 +264,24 @@ test('decodeSource uses the built-in codecs for PNG and GIF and the injected bro
     assert.equal(gif.via, 'built-in GIF decoder');
     assert.equal(gif.frames, 2);
 
-    await assert.rejects(decodeSource(loadSource(path.join(FIXTURES, 'import-white.jpg')), { browserDecode: null }), /needs a headless browser/);
+    const builtInJpeg = await decodeSource(loadSource(path.join(FIXTURES, 'import-white.jpg')), { browserDecode: null });
+    assert.equal(builtInJpeg.via, 'built-in JPEG decoder');
+    assert.deepEqual([builtInJpeg.width, builtInJpeg.height], [96, 96]);
+    await assert.rejects(decodeSource(loadSource(path.join(FIXTURES, 'import-alpha.webp')), { browserDecode: null }), /needs a headless browser/);
+    const progressive = writeBytes(path.join(dir, 'progressive.jpg'), Buffer.from(PROGRESSIVE_JPEG, 'base64'));
+    await assert.rejects(decodeSource(loadSource(progressive), { browserDecode: null }), /built-in decoder cannot read.*none is available/);
 
     let asked = null;
     const fake = async (request) => {
       asked = request;
       return { width: request.width, height: request.height, rgba: canvas(request.width, request.height, [1, 2, 3, 255]) };
     };
-    const jpeg = await decodeSource(loadSource(path.join(FIXTURES, 'import-white.jpg')), { browserDecode: fake });
-    assert.equal(jpeg.via, 'browser');
-    assert.deepEqual([asked.width, asked.height, path.basename(asked.imagePath)], [96, 96, 'import-white.jpg']);
+    const webp = await decodeSource(loadSource(path.join(FIXTURES, 'import-alpha.webp')), { browserDecode: fake });
+    assert.equal(webp.via, 'browser');
+    assert.deepEqual([asked.width, asked.height, path.basename(asked.imagePath)], [96, 96, 'import-alpha.webp']);
+    const viaBrowser = await decodeSource(loadSource(progressive), { browserDecode: fake });
+    assert.equal(viaBrowser.via, 'browser', 'a JPEG the built-in decoder refuses goes to the browser');
+    assert.equal(path.basename(asked.imagePath), 'progressive.jpg');
 
     const wrongSize = async () => ({ width: 10, height: 10, rgba: canvas(10, 10, [0, 0, 0, 255]) });
     await assert.rejects(decodeSource(loadSource(path.join(FIXTURES, 'import-alpha.webp')), { browserDecode: wrongSize }), /decoded .* as 10x10, expected 96x96/);
@@ -276,7 +290,7 @@ test('decodeSource uses the built-in codecs for PNG and GIF and the injected bro
 
 test('importImage writes the master PNG and a wrapper SVG the validator and export accept', async () => {
   await withTemp(async (dir) => {
-    const src = writePng(path.join(dir, 'gemini.png'), 300, 300, ringOnBackground(300, WHITE));
+    const src = writePng(path.join(dir, 'artwork.png'), 300, 300, ringOnBackground(300, WHITE));
     const out = path.join(dir, 'icon-work');
     const result = await importImage({ srcPath: src, outDir: out, name: 'my-app' });
     assert.deepEqual(result.files.map((file) => path.basename(file.path)), ['my-app-master.png', 'my-app-master.svg']);

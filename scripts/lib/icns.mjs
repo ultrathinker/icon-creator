@@ -1,9 +1,8 @@
-// ICNS (Apple Icon Image) writer and parser, from the public format
-// description: an 8-byte file header ('icns' + total file length, big-endian,
-// length includes the header itself), then chunks of a 4-byte type code, a
-// 4-byte big-endian length that INCLUDES the 8-byte chunk header, and the
-// image data. Modern files store PNG data; the table below is verified against
-// Wikipedia's "Apple Icon Image format" and the Rust `icns` crate docs.
+// ICNS (Apple Icon Image) writer and parser, from the public format description:
+// an 8-byte file header ('icns' + total file length, big-endian, length
+// includes the header itself), then chunks of a 4-byte type code, a 4-byte
+// big-endian length that INCLUDES the 8-byte chunk header, and the image data.
+// Modern files store PNG data.
 
 import { pngInfo } from './png.mjs';
 
@@ -26,19 +25,21 @@ export const ICNS_PNG_TYPES = [
 const ICNS_SIZES = new Set(ICNS_PNG_TYPES.map((entry) => entry.size));
 
 /**
- * Build an .icns from a Map of pixel size -> PNG Buffer. All seven unique
- * sizes (16, 32, 64, 128, 256, 512, 1024) must be present; each PNG is
- * verified to be square and of its declared size. Retina chunk types reuse
- * the @1x pixel data of their size.
+ * Build an .icns from a Map of pixel size -> PNG Buffer. Every size given must be one of the seven (16, 32, 64, 128,
+ * 256, 512, 1024) and each PNG is verified to be square and of its declared size; a size that is not given gets no
+ * chunk (a 512 px master makes an .icns without the 1024 px slice, which macOS accepts), but the set may not be empty
+ * and must reach 256 px. Retina chunk types reuse the @1x pixel data of their size.
  */
 export function buildIcns(pngBySize) {
-  const missing = [...ICNS_SIZES].filter((size) => !pngBySize.has(size));
-  if (missing.length > 0) {
-    throw new Error(`.icns is missing renders for: ${missing.join(', ')} px`);
+  const unknown = [...pngBySize.keys()].filter((size) => !ICNS_SIZES.has(size));
+  if (unknown.length > 0) throw new Error(`.icns has no slice of ${unknown.join(', ')} px`);
+  if (![...pngBySize.keys()].some((size) => size >= 256)) {
+    throw new Error('.icns needs renders up to at least 256 px; the missing sizes are: ' + [...ICNS_SIZES].filter((size) => !pngBySize.has(size)).join(', '));
   }
   const chunks = [];
   for (const descriptor of ICNS_PNG_TYPES) {
     const png = pngBySize.get(descriptor.size);
+    if (png === undefined) continue;
     const info = pngInfo(png);
     if (info.width !== descriptor.size || info.height !== descriptor.size) {
       throw new Error(

@@ -64,10 +64,15 @@ test('the file header length field equals the exact byte count of the file', () 
   assert.equal(icns.toString('ascii', 0, 4), 'icns');
 });
 
-test('buildIcns refuses a set with missing sizes', () => {
-  const map = fullSet();
-  map.delete(512);
-  assert.throws(() => buildIcns(map), /missing renders.*512/);
+test('buildIcns writes the slices it is given when they reach 256 px, and refuses a set below 256 px', () => {
+  const partial = fullSet();
+  partial.delete(1024);
+  const sizes = parseIcns(buildIcns(partial)).chunks.map((chunk) => chunk.expectedSize);
+  assert.ok(!sizes.includes(1024), 'no 1024 px chunk when no 1024 px render is given');
+  assert.ok(sizes.includes(512));
+  const tooSmall = fullSet();
+  for (const size of [256, 512, 1024]) tooSmall.delete(size);
+  assert.throws(() => buildIcns(tooSmall), /at least 256 px.*256, 512, 1024/);
 });
 
 test('parseIcns rejects a file whose header length disagrees with its size', () => {

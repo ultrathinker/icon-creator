@@ -1,22 +1,27 @@
 ---
 name: icon-creator
-description: Turn a plain-language app description, or the user's own image file (PNG, JPEG, WebP, GIF, BMP, SVG), into a finished, cross-platform icon set - design or prepare the master, review it at real sizes with headless-browser renders, and export Windows .ico, macOS .icns, the Linux hicolor tree, web favicons and master files.
+description: Turn a plain-language app description, the user's own image file (PNG, JPEG, WebP, GIF, BMP, SVG) or a folder of the user's pictures into a finished, cross-platform icon set - design or prepare the master, or build a pack for every picture of a folder and compare them on contact sheets at 64/32/16 px, review at real sizes, and export Windows .ico, macOS .icns, the Linux hicolor tree, web favicons and master files.
 ---
 
 # Icon creator
 
-You turn an application icon into the complete set: either you design it as
-SVG (draw mode), or you prepare an image file the user brings (file mode, for
-example a PNG made by an image generator). You render it with the user's own
-browser, look at the result at working sizes, then export Windows `.ico`,
-macOS `.icns`, Linux `hicolor` tree + `.desktop` snippet, web favicons +
-manifest, and the master `icon-1024.png` (plus `icon.svg` when the master is a
-vector drawing).
+You turn an application icon into the complete set, in one of three ways: you
+design it as SVG (draw mode); you prepare one image file the user brings (file
+mode, for example a logo a designer made); or you take in a folder of the
+user's pictures, build a finished pack for every one of them, show them side
+by side on contact sheets and let the user choose (folder mode). You look at
+the result at working sizes, and the set comes out as Windows `.ico`, macOS
+`.icns`, Linux `hicolor` tree + `.desktop` snippet, web favicons + manifest,
+and the master PNG (plus `icon.svg` when the master is a vector drawing).
 
-The tool is `node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs"`. It needs Node 18+
-and a renderer (Chrome, Chromium or Edge; or resvg / rsvg-convert / inkscape /
-magick). It never downloads anything and writes only the output you name plus
-its own temporary scratch folder (see the last section).
+Draw mode and file mode use `node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs"`,
+which needs Node 18+ and a renderer (Chrome, Chromium or Edge; or resvg /
+rsvg-convert / inkscape / magick). Folder mode uses
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/pack.mjs"` (and, only for its optional SVG
+step, `node "${CLAUDE_PLUGIN_ROOT}/scripts/svg.mjs"`); it needs a browser only
+for WebP and BMP pictures and for the SVG step. No script ever downloads
+anything; each writes only the output you name plus its own temporary scratch
+folder (see the last section).
 
 ## Workflow
 
@@ -33,35 +38,44 @@ refusal.
 
 ### 1. Check the machine
 
-Run `doctor` first. If it reports no renderer at all, stop and tell the user
-exactly what to install (a browser is the best option); do not improvise.
+Run `doctor` first. If it reports no renderer at all, tell the user exactly
+what to install (a browser is the best option); do not improvise. Without a
+renderer only folder mode works (for PNG, JPEG and GIF pictures; WebP and BMP
+pictures and the SVG step need a browser): still ask question 0 (unless the
+request already decides the mode), go on only with folder mode, and for
+draw mode or file mode stop there.
 
     node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs" doctor
 
-### 2. Question 0: draw the icon, or use the user's own image file?
+### 2. Question 0: draw the icon, use one image file, or choose from a folder?
 
 Ask this ONE question alone, in its own `AskUserQuestion` call, before anything
 else (the tool adds a free-text "Other" choice by itself):
 
-**Should I draw the icon for you or use your own image file?** (header `Mode`).
-Options: `Draw one for me` and `Use my image file`. Put into the question text:
-"To use your own image, choose Other and type the path to the file."
+**Should I draw the icon for you, use your own image file, or choose from a
+folder of your images?** (header `Mode`). Options: `Draw one for me`, `Use my
+image file` and `Choose from a folder of images`. Put into the question text:
+"To use your own file or folder, choose Other and type its path."
 
 What the answer means:
 
 - `Use my image file` -> **file mode** (next section).
-- Text typed into "Other" that is a path to an existing image file -> file
-  mode, with that path. If it looks like a path (a drive letter, a slash or
-  backslash, or an image extension) but no such file exists, say so and ask for
-  the path again; do not guess.
+- `Choose from a folder of images` -> **folder mode** (the section after it).
+- Text typed into "Other" that is a path: an existing image file -> file mode,
+  an existing folder -> folder mode, with that path. If it looks like a path (a
+  drive letter, a slash or backslash, or an image extension) but nothing exists
+  there, say so and ask for the path again; do not guess.
 - `Draw one for me`, or text typed into "Other" that is a description of an
-  icon -> **draw mode** (the section after next); a typed description answers
-  the "Which icon" question there.
+  icon -> **draw mode**; a typed description answers the "Which icon" question
+  there.
 
 **Skip question 0** when the command argument or the user's message already
 decides it: it contains a path to an existing image file (PNG, JPEG, WebP, GIF,
-BMP or SVG; check that it exists) -> file mode; it contains a description of an
-icon -> draw mode.
+BMP or SVG; check that it exists) -> file mode; a path to an existing folder
+(check that it is a folder) -> folder mode; a description of an icon -> draw
+mode. An argument that looks like a path (a drive letter, a slash or
+backslash, or an image extension) where nothing exists is a mistyped path,
+never a description: say so and ask for the path again.
 
 ## File mode: the user's own image
 
@@ -192,6 +206,90 @@ raster source that no vector files exist for this set and which were skipped,
 and where `icon-work/` is (it holds the prepared master and the review images;
 the user may delete it).
 
+## Folder mode: choose one from a folder of pictures
+
+The user already has several pictures for the icon (from a designer, a design
+tool, earlier attempts) in one folder. Every picture becomes a numbered
+candidate with its own finished icon pack, contact sheets show all candidates
+side by side at 64, 32 and 16 px, you recommend the best ones and the user
+picks one. Do not ask how many icons (it is the number of pictures) and do not
+ask for approval first: every candidate gets its pack, the user chooses after.
+
+The details of every step (what the commands print, every warning, how to
+judge the sheets, later rounds, another look of the same candidates) are in
+`references/folder-mode.md` next to this file: read it before G3.
+
+**G1. Get the folder.** Use the path from question 0, the command argument or
+the user's message; otherwise ask for it in a plain message. Only the folder's
+own files are read, not its subfolders, and the pictures are never changed,
+moved or deleted.
+
+**G2. Ask ONLY the location question**, exactly as in F2 (header `Location`).
+The candidates, their packs and the sheets go to `<root>/candidates/`, the run
+folder; when it already exists from an earlier round with the same pictures,
+use it: the next round only adds. `<name>` is the app name when you know it,
+otherwise the picture folder's name, lower-cased, with every character other
+than letters, digits, `-` and `_` turned into `-`; say which you chose.
+`<title>` is the display name.
+
+**G3. Take the pictures in** (at most 64 new ones per call):
+
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/pack.mjs" ingest --from "C:\art\icon-ideas" --run "<root>/candidates"
+
+PNG, JPEG and GIF (first frame) are read built in, WebP and BMP through the
+headless browser; a picture larger than 1024 px is stored at 1024 px. The JSON
+says which file became which candidate number and lists the files it skipped
+with the reason (each list shows at most 50 entries, `counts` has the totals):
+tell the user how many pictures were taken in and relay the skipped files with
+their reasons. Use the `run` path from the JSON as `<run>` in every later
+command. If no picture could be taken in, the command fails with the reasons:
+tell the user and stop. A folder of many large pictures can take minutes
+(about 3 seconds per 8000 px picture): give `ingest` and `build` a long
+timeout (10 minutes) or run them in the background.
+
+**G4. Build every pack and the contact sheets:**
+
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/pack.mjs" build --run "<run>" --name my-app --title "My App"
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/pack.mjs" sheet --run "<run>"
+
+`build` writes `pack-<k>/` for every candidate: the finished set of that
+picture (cropped to its subject, a plain background removed). It prints a
+short summary (`skipped` first, then per candidate its `pack`, `master` size,
+`warnings` codes and `svgFit` level) and writes the full detail to
+`<run>/build-<n>.json`. `sheet` writes `sheet-1.png`, `sheet-2.png`, ...,
+eight candidates per sheet. Quote the warnings that matter (the reference
+explains each code).
+
+**G5. Look, recommend, let the user pick.** Read every sheet image yourself
+and rank by legibility at 16 and 32 px first (the reference has the full
+order). Then ask ONE question in one `AskUserQuestion` call: **Which candidate
+should become your icon?** (header `Pick`), with your top two or three
+candidate numbers as the options (`Number 3`, ...), each with one sentence of
+why and the picture's file name as its description. Put into the question
+text: "To choose another number, choose Other and type it." With only one
+usable candidate there is nothing to choose: say so, it is the result. When
+the folder had more than 64 pictures, take in, build and sheet every round
+first (until `notTaken` is empty) and ask once, after reading all the sheets.
+
+**G6. The chosen set.** Candidate k's set is already finished: `<run>/pack-<k>/`;
+nothing more is exported. Say in one line that the packs of the other
+candidates stay in the run folder and may be deleted. Then say, as a
+statement and not a question, that you can redraw the chosen picture as a
+true vector (an `icon.svg`, a favicon that stays sharp at any size, the whole
+set rebuilt from the drawing), and how well the sheet's SVG badge says this
+number should redraw. Only when the user asks for it, read
+`references/svg-step.md` and follow it.
+
+**G7. Summary.** Finish with the section "Tell the user what exists and how to
+wire it" below, with `<set>` = `<run>/pack-<k>` (or the pack the SVG step
+built).
+
+**Later rounds.** When the user adds pictures to the folder and asks again,
+run the same `ingest` (it adds only the new pictures, numbered after the
+others), then `build --only <new numbers>` with the same `--title` and
+`sheet --only <new numbers>` (which write new sheet files). Never pass
+`--force` to redo what exists.
+
 ## Draw mode: you design the icon
 
 ### D1. Ask the four intake questions (and a fifth when N is 2 or more)
@@ -231,7 +329,7 @@ Skip it when N is 1, or when the user already said how ("in parallel", "with
 subagents", "one by one") - then simply follow what they said. "One by one"
 means the normal workflow below (D2 to D6). "In parallel" means the "Parallel
 mode" section after D6 instead of D2 to D6. File mode never asks this: it always
-makes exactly one icon.
+makes exactly one icon. Folder mode does not ask it either.
 
 What the answers mean:
 
@@ -451,11 +549,13 @@ shipping it. Then tell the user, per icon: the motif, the folder, the files, the
 warnings or `Notes:` the check printed, and what you saw. End with the wiring
 instructions below.
 
-## Tell the user what exists and how to wire it (both modes)
+## Tell the user what exists and how to wire it (every mode)
 
 List the files that were actually written and the full path of `<root>`, then
 give the wiring line(s) for the user's project type (ask if you cannot tell).
-`<set>` is the exported folder, for example `icons/my-app`:
+`<set>` is the exported folder, for example `icons/my-app` (in folder mode the
+chosen pack, for example `icons/candidates/pack-3`; see the note after the
+list):
 
 - **.NET / Avalonia / MAUI (csproj):** `<ApplicationIcon><set>\windows\my-app.ico</ApplicationIcon>`
   (MAUI also accepts an SVG via `<MauiIcon Include="<set>\icon.svg" />`).
@@ -486,22 +586,40 @@ MAUI (`<MauiIcon Include="<set>\icon-1024.png" />`) and Qt (`QIcon` from the
 PNG); the Tauri line above already uses PNGs, and the web `head.html` already
 omits the SVG link.
 
+A pack from folder mode has the layout of a set built from a raster image, plus
+`web/icon-maskable-512.png` (the picture inside Android's safe zone). Its
+master PNG is named after its size: `icon-1024.png`, or `icon-512.png` and so
+on when the picture was smaller, so use that name where a line above says
+`icon-1024.png`. A pack built by the SVG step also has `icon.svg`,
+`web/favicon.svg` and `linux/hicolor/scalable/apps/<name>.svg` (inside the
+hicolor tree, so the Linux copy above installs it too).
+
 Keep the `icon-work/` folder - it holds the editable SVG sources (draw mode) or
 the prepared master and review images (file mode) the user may want later - and
-say the user can delete it (and `preview/`).
+say the user can delete it (and `preview/`). In folder mode the run folder
+`<root>/candidates/` holds every candidate, its pack and the sheets: the user
+may delete the packs they do not use.
 
 ## What this tool will never do
 
 No network requests, no telemetry, and it never overwrites an existing file
-without `--force`. It reads no user files beyond the SVGs you point it at and
+without `--force`. It reads no user files beyond the SVGs you point it at,
 the one image file the user named for `import` (a regular file that is not
 itself a link, at most 25 MB and 8192 x 8192 px, format detected from the content,
-metadata not interpreted, nothing in it executed or fetched; for JPEG, WebP
-and BMP the headless browser opens that one file as a picture to decode it);
-it does read back what it generated itself (rendered PNGs and the temporary
-files used to verify them). It writes the output folder you name plus a
-scratch subfolder of the OS temp dir (temporary HTML, a throwaway browser
-profile, intermediate PNGs). Commands may run at the same time (parallel mode
+metadata not interpreted, nothing in it executed or fetched; for WebP and BMP,
+and the rare PNG or JPEG the built-in decoders cannot read, the headless
+browser opens that one file as a picture to decode it) and, in folder mode,
+the pictures directly inside the folder the user named for `ingest` (only its
+own files, never its subfolders or links; files whose names start with a dot
+and the system files `Thumbs.db`, `desktop.ini` and `.DS_Store` are not
+opened; every other file is opened to see whether it is a picture, and of one
+that is not, only its first 4 KB are read and its name is listed with the
+reason; the same limits and decoding per picture; the pictures are only read,
+never changed, moved or deleted); it does read back what it generated itself
+(rendered PNGs, candidates, packs and the temporary files used to verify
+them). It writes the output folder you name (in folder mode the run folder)
+plus a scratch subfolder of the OS temp dir (temporary HTML, a throwaway
+browser profile, intermediate PNGs). Commands may run at the same time (parallel mode
 starts one subagent per icon): every command has its own scratch folder and
 writes only where it was told. That scratch folder is removed when the command
 finishes; the removal is best effort, so a browser that still holds a file
