@@ -8,12 +8,17 @@
 //                       silent       write nothing and keep running
 //                       silent-once  like silent for the first launch, like linger afterwards
 //   FAKE_BROWSER_PIDS   file that receives one line per launch: "<fake pid> <helper pid>"
+//   FAKE_BROWSER_SEEN   file that receives one JSON line per launch: the address of the <img> on the page it was given
+//                       and the text found at that address at that moment
+//   FAKE_BROWSER_SWAP   with FAKE_BROWSER_SEEN: a file that is overwritten with FAKE_BROWSER_SWAP_TEXT just before the
+//                       page is read (somebody replacing the user's SVG after the check)
 //
 // Like Chrome it starts a helper process of its own. A browser that lingers
 // leaves the helper running too: ending only the launcher would leak it.
 
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { encodePng } from '../../scripts/lib/png.mjs';
 
 const arg = (prefix) => process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length);
@@ -37,6 +42,14 @@ if (pidsFile) {
   fs.appendFileSync(pidsFile, `${process.pid} ${helper.pid}\n`);
 }
 if (mode === 'silent-once') mode = firstLaunch ? 'silent' : 'linger';
+
+if (process.env.FAKE_BROWSER_SEEN) {
+  const html = fs.readFileSync(fileURLToPath(process.argv[process.argv.length - 1]), 'utf8');
+  const src = /<img\b[^>]*?\bsrc="([^"]+)"/.exec(html)?.[1] ?? null;
+  if (process.env.FAKE_BROWSER_SWAP) fs.writeFileSync(process.env.FAKE_BROWSER_SWAP, process.env.FAKE_BROWSER_SWAP_TEXT ?? '');
+  const text = src === null ? null : fs.readFileSync(fileURLToPath(src), 'utf8');
+  fs.appendFileSync(process.env.FAKE_BROWSER_SEEN, `${JSON.stringify({ src, text })}\n`);
+}
 
 // Transparent corners, opaque middle: what the renderer's checks expect.
 function picture() {

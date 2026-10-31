@@ -35,7 +35,8 @@ This plugin runs entirely on your machine and collects nothing.
   loaded; the image is never run, and nothing in it is fetched. PNG, GIF and baseline JPEG are
   decoded by the bundled scripts without a browser. (SVGs are rendered in the browser's image mode, where
   scripting is disabled, after static checks - a strict markup walk of the
-  raw file that refuses malformed markup, then pattern scans on a copy with
+  raw file that refuses malformed markup, then a check of every `href` and
+  `src` address read from the parsed tags and pattern scans on a copy with
   XML entities and CSS escapes decoded - reject scripts and external
   references outright).
 - **What it writes:** the output folder you name (for `import`, the prepared

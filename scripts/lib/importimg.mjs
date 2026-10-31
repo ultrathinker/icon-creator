@@ -53,7 +53,8 @@ function toWorkingSize(decoded) {
  * to the browser), GIF through the built-in first-frame decoder, a baseline
  * JPEG through the built-in JPEG decoder (progressive, CMYK and other JPEG
  * variants it refuses fall back to the browser), WebP/BMP through
- * `browserDecode({ imagePath, width, height })`.
+ * `browserDecode({ imagePath, bytes, format, width, height })` (`bytes`: the file as it was read, to be shown instead of
+ * the path; `format`: what its bytes are, whatever its name says).
  */
 export async function decodeSource(source, { browserDecode = null } = {}) {
   const { format, buffer, width, height, path: file } = source;
@@ -85,7 +86,7 @@ export async function decodeSource(source, { browserDecode = null } = {}) {
   if (browserDecode === null) {
     throw new Error(`decoding ${FORMAT_NAMES[format] ?? format} needs a headless browser (Chrome, Chromium or Edge); none is available`);
   }
-  const decoded = await browserDecode({ imagePath: file, width, height });
+  const decoded = await browserDecode({ imagePath: file, bytes: buffer, format, width, height });
   const expected = browserDecodeSize(width, height);
   if (decoded.width !== expected.width || decoded.height !== expected.height) {
     throw new Error(`the browser decoded ${file} as ${decoded.width}x${decoded.height}, expected ${expected.width}x${expected.height}`);

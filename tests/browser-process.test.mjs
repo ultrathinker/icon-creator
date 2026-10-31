@@ -11,13 +11,14 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runBrowser } from '../scripts/lib/browserproc.mjs';
-import { renderSvgPng } from '../scripts/lib/renderers.mjs';
+import { renderSvgPng, decodeImageWithBrowser, CLI_TOOL_BUILDERS } from '../scripts/lib/renderers.mjs';
 import { removeTree } from './helpers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures', 'fake-browser.mjs');
 const LEAVER = path.join(here, 'fixtures', 'leave-browser.mjs');
 const CLOCK = path.join(here, 'fixtures', 'clock.svg');
+const FAKE_TOOL = path.join(here, 'fixtures', 'fake-tool.mjs');
 
 const alive = (pid) => {
   try {
@@ -188,5 +189,133 @@ test('renderSvgPng fails with a clear message when the browser never writes anyt
     assert.equal(fs.existsSync(out), false);
     assert.equal(recordedPids(pidsFile).length, 4, 'one launch and one retry');
     for (const pid of recordedPids(pidsFile)) assert.equal(alive(pid), false, `process ${pid} was left running`);
+  });
+});
+
+// ---- the renderer is shown the text that was checked, not the path ------------------------------------------------
+
+const CHECKED_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" fill="#1234aa"/></svg>';
+const SWAPPED_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><image href="http://127.0.0.1:9/evil.png" x="4" y="4" width="1" height="1"/>' +
+  '<rect x="4" y="4" width="8" height="8" fill="#12aa34"/></svg>';
+
+async function withEnv(values, body) {
+  const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  try {
+    return await body();
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+const seenBy = (file) =>
+  fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+test('renderSvgPng shows the browser a private copy of the text it checked: a file swapped after the check is not drawn', async () => {
+  await withFake('exit', async ({ dir }) => {
+    const user = path.join(dir, 'icon.svg');
+    const seen = path.join(dir, 'seen.jsonl');
+    fs.writeFileSync(user, CHECKED_SVG);
+    await withEnv({ FAKE_BROWSER_SEEN: seen, FAKE_BROWSER_SWAP: user, FAKE_BROWSER_SWAP_TEXT: SWAPPED_SVG }, () =>
+      renderSvgPng({ svgPath: user, size: 16, outPath: path.join(dir, 'icon-16.png'), renderer: fakeRenderer(), tempDir: dir }),
+    );
+    const [record] = seenBy(seen);
+    assert.equal(fs.readFileSync(user, 'utf8'), SWAPPED_SVG, 'the swap did happen, after the check and before the render');
+    assert.equal(record.text, CHECKED_SVG, 'the browser was shown the checked text');
+    assert.notEqual(path.resolve(fileURLToPath(record.src)), path.resolve(user), 'and not the path the user named');
+    assert.equal(fs.existsSync(fileURLToPath(record.src)), false, 'the private copy is removed afterwards');
+  });
+});
+
+test('renderSvgPng shows a command-line renderer a private copy of the text it checked as well', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-faketool-'));
+  const original = CLI_TOOL_BUILDERS.resvg;
+  CLI_TOOL_BUILDERS.resvg = (svg, size, out) => [FAKE_TOOL, svg, out, String(size)];
+  try {
+    const user = path.join(dir, 'icon.svg');
+    const seen = path.join(dir, 'seen.jsonl');
+    fs.writeFileSync(user, CHECKED_SVG);
+    const renderer = { kind: 'cli', name: 'resvg', label: 'resvg', path: process.execPath };
+    await withEnv({ FAKE_TOOL_SEEN: seen, FAKE_TOOL_SWAP: user, FAKE_TOOL_SWAP_TEXT: SWAPPED_SVG }, () =>
+      renderSvgPng({ svgPath: user, size: 16, outPath: path.join(dir, 'icon-16.png'), renderer, tempDir: dir }),
+    );
+    const [record] = seenBy(seen);
+    assert.equal(fs.readFileSync(user, 'utf8'), SWAPPED_SVG, 'the swap did happen, after the check and before the render');
+    assert.equal(record.text, CHECKED_SVG, 'the tool was shown the checked text');
+    assert.notEqual(path.resolve(record.svgPath), path.resolve(user), 'and not the path the user named');
+    assert.equal(fs.existsSync(record.svgPath), false, 'the private copy is removed afterwards');
+  } finally {
+    CLI_TOOL_BUILDERS.resvg = original;
+    removeTree(dir);
+  }
+});
+
+test('decodeImageWithBrowser shows the browser a private copy of the bytes it was given: a file swapped after the check is not decoded', async () => {
+  await withFake('exit', async ({ dir }) => {
+    // The name lies: these bytes are a WebP, and a browser would show a file called .svg as an SVG.
+    const user = path.join(dir, 'picture.svg');
+    const seen = path.join(dir, 'seen.jsonl');
+    const checked = Buffer.from('the bytes that were read and checked');
+    fs.writeFileSync(user, checked);
+    // The fake browser paints no verdict row, so the decode itself is refused; what matters is what it was shown.
+    await withEnv({ FAKE_BROWSER_SEEN: seen, FAKE_BROWSER_SWAP: user, FAKE_BROWSER_SWAP_TEXT: SWAPPED_SVG }, () =>
+      assert.rejects(
+        decodeImageWithBrowser({ imagePath: user, bytes: checked, format: 'webp', width: 16, height: 16, renderer: fakeRenderer(), tempDir: dir }),
+        /could not decode picture\.svg/,
+      ),
+    );
+    const [record] = seenBy(seen);
+    assert.equal(fs.readFileSync(user, 'utf8'), SWAPPED_SVG, 'the swap did happen, after the check and before the decode');
+    assert.equal(record.text, checked.toString('utf8'), 'the browser was shown the bytes that were checked');
+    assert.notEqual(path.resolve(fileURLToPath(record.src)), path.resolve(user), 'and not the path the user named');
+    assert.match(path.basename(fileURLToPath(record.src)), /\.webp$/, 'the copy is named by the detected format, not by the name the user gave');
+    assert.equal(fs.existsSync(fileURLToPath(record.src)), false, 'the private copy is removed afterwards');
+  });
+});
+
+test('decodeImageWithBrowser gives the private copy no suffix when the format is not known', async () => {
+  await withFake('exit', async ({ dir }) => {
+    const user = path.join(dir, 'picture.svg');
+    const seen = path.join(dir, 'seen.jsonl');
+    fs.writeFileSync(user, 'x');
+    await withEnv({ FAKE_BROWSER_SEEN: seen }, () =>
+      assert.rejects(decodeImageWithBrowser({ imagePath: user, bytes: Buffer.from('x'), width: 16, height: 16, renderer: fakeRenderer(), tempDir: dir }), /could not decode/),
+    );
+    const [record] = seenBy(seen);
+    assert.match(path.basename(fileURLToPath(record.src)), /^decode-src-\d+-\d+$/);
+  });
+});
+
+test('the private copy is removed even when the first removals are refused for a moment, and nothing else is touched', async () => {
+  await withFake('exit', async ({ dir }) => {
+    const user = path.join(dir, 'icon.svg');
+    fs.writeFileSync(user, CHECKED_SVG);
+    const bystander = path.join(dir, 'svg-16-bystander.txt');
+    fs.writeFileSync(bystander, 'not ours');
+    const realRemove = fs.rmSync;
+    let refused = 0;
+    fs.rmSync = (target, options) => {
+      if (/[\\/]svg-16-\d+-\d+\.svg$/.test(String(target)) && refused < 2) {
+        refused += 1;
+        throw Object.assign(new Error('EPERM: operation not permitted, unlink'), { code: 'EPERM' });
+      }
+      return realRemove(target, options);
+    };
+    try {
+      await renderSvgPng({ svgPath: user, size: 16, outPath: path.join(dir, 'icon-16.png'), renderer: fakeRenderer(), tempDir: dir });
+    } finally {
+      fs.rmSync = realRemove;
+    }
+    assert.equal(refused, 2, 'the removal was refused twice');
+    assert.deepEqual(fs.readdirSync(dir).filter((name) => /^svg-16-\d+-\d+\.svg$/.test(name)), [], 'and the copy is gone all the same');
+    assert.equal(fs.readFileSync(bystander, 'utf8'), 'not ours');
   });
 });

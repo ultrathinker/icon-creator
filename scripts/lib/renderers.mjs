@@ -244,11 +244,45 @@ export function renderPageHtml(svgUrl, size) {
 let profileCounter = 0;
 
 /**
+ * Run `use(copyPath)` on a private copy of `content`, written to a new file named `name` in `tempDir` (exclusive
+ * create: an entry that is already there is never followed or removed), and take the copy away afterwards. What a
+ * renderer is shown is this copy, never the user's path, so a file replaced after it was checked is not what gets
+ * drawn. The removal is tried a few times: a browser that was just stopped, or a virus scanner, can hold the file for a
+ * moment; the caller removes the whole scratch folder in the end. `tempDir` must be a private folder of the caller's.
+ */
+export async function withPrivateCopy(tempDir, name, content, use) {
+  const copyPath = path.join(tempDir, name);
+  // fs.rmSync retries only a recursive removal, and a recursive one is the last thing to run on a path that may have been replaced.
+  const remove = async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        fs.rmSync(copyPath, { force: true });
+        return;
+      } catch (error) {
+        if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  };
+  try {
+    fs.writeFileSync(copyPath, content, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error.code !== 'EEXIST') await remove();
+    throw error;
+  }
+  try {
+    return await use(copyPath);
+  } finally {
+    await remove();
+  }
+}
+
+/**
  * Render one SVG to a PNG of exactly `size` px with a transparent background.
  * The user's `outPath` is never touched until the render exists, has the
  * exact pixel size and transparent corners (or `force` is set for an
  * overwrite). `tempDir` must already exist and holds the throwaway browser
- * profile, the HTML page and the scratch PNG.
+ * profile, the HTML page, the private copy of the checked SVG and the scratch PNG.
  */
 export async function renderSvgPng({ svgPath, size, outPath, renderer, tempDir, force = false, log = () => {} }) {
   outPath = resolveOutputFile(outPath).path;
@@ -271,11 +305,12 @@ export async function renderSvgPng({ svgPath, size, outPath, renderer, tempDir, 
     throw new Error(`${svgPath} cannot be rendered:\n  - ${validation.errors.join('\n  - ')}`);
   }
   const scratchPath = path.join(tempDir, `out-${size}-${process.pid}-${(profileCounter += 1)}.png`);
-  if (renderer.kind === 'browser') {
-    await renderWithBrowser({ svgPath, size, outPath: scratchPath, renderer, tempDir, log });
-  } else {
-    await renderWithTool({ svgPath, size, outPath: scratchPath, renderer, viewBoxSize: validation.viewBox.width, log });
-  }
+  // The renderer is given a private copy of exactly the text that was just checked, never the user's path.
+  await withPrivateCopy(tempDir, `svg-${size}-${process.pid}-${(profileCounter += 1)}.svg`, svgText, (checkedPath) =>
+    renderer.kind === 'browser'
+      ? renderWithBrowser({ svgPath: checkedPath, size, outPath: scratchPath, renderer, tempDir, log })
+      : renderWithTool({ svgPath: checkedPath, label: svgPath, size, outPath: scratchPath, renderer, viewBoxSize: validation.viewBox.width, log }),
+  );
   const verified = verifyRenderedPng(fs.readFileSync(scratchPath), size, { label: `${renderer.label} (${svgPath})` });
   // Publish by replacing the directory entry through an exclusively created
   // staging file, never by writing through an existing entry: an alias at
@@ -430,7 +465,18 @@ export function decodePageHtml(imageUrl, width, height) {
   ].join('\n');
 }
 
-export async function decodeImageWithBrowser({ imagePath, width, height, renderer, tempDir, log = () => {} }) {
+/**
+ * Suffix of the private copy of a picture, by the format that was detected from its bytes. The browser takes the type of
+ * a file URL from the suffix, and the suffix of the user's own file may lie: a WebP named picture.svg is shown as an SVG.
+ */
+const DECODE_SUFFIX = { png: '.png', jpeg: '.jpg', gif: '.gif', webp: '.webp', bmp: '.bmp' };
+
+/**
+ * Decode a picture with the browser's own decoders. `bytes` (the file as it was read and checked, of detected format
+ * `format`) is shown through a private copy in `tempDir`, so a file replaced since is not what gets decoded; without it
+ * the browser opens `imagePath` itself.
+ */
+export async function decodeImageWithBrowser({ imagePath, bytes = null, format = null, width, height, renderer, tempDir, log = () => {} }) {
   if (renderer.kind !== 'browser') {
     throw new Error(
       `decoding this image format needs a headless browser (Chrome, Chromium or Edge) and ${renderer.label} is not one; ` +
@@ -439,8 +485,22 @@ export async function decodeImageWithBrowser({ imagePath, width, height, rendere
   }
   const { width: shownWidth, height: shownHeight } = browserDecodeSize(width, height);
   const outPath = path.join(tempDir, `decode-${process.pid}-${profileCounter += 1}.png`);
-  const html = decodePageHtml(pathToFileURL(path.resolve(imagePath)).href, shownWidth, shownHeight);
-  await screenshotPage({ html, width: shownWidth, height: shownHeight + 1, outPath, renderer, tempDir, log });
+  const show = (shownPath) =>
+    screenshotPage({
+      html: decodePageHtml(pathToFileURL(path.resolve(shownPath)).href, shownWidth, shownHeight),
+      width: shownWidth,
+      height: shownHeight + 1,
+      outPath,
+      renderer,
+      tempDir,
+      log,
+    });
+  if (bytes === null) {
+    await show(imagePath);
+  } else {
+    const name = `decode-src-${process.pid}-${(profileCounter += 1)}${DECODE_SUFFIX[format] ?? ''}`;
+    await withPrivateCopy(tempDir, name, bytes, show);
+  }
   const shot = decodePng(fs.readFileSync(outPath));
   fs.rmSync(outPath, { force: true });
   // Every pixel of the verdict row must be green: a failed or half-loaded
@@ -458,7 +518,7 @@ export async function decodeImageWithBrowser({ imagePath, width, height, rendere
   return { width: shot.width, height: shownHeight, rgba: shot.rgba.subarray(0, shownWidth * shownHeight * 4) };
 }
 
-async function renderWithTool({ svgPath, size, outPath, renderer, viewBoxSize, log }) {
+async function renderWithTool({ svgPath, label = svgPath, size, outPath, renderer, viewBoxSize, log }) {
   const buildArgs = CLI_TOOL_BUILDERS[renderer.name];
   const absoluteSvg = path.resolve(svgPath);
   const absoluteOut = path.resolve(outPath);
@@ -480,7 +540,7 @@ async function renderWithTool({ svgPath, size, outPath, renderer, viewBoxSize, l
   }
   if (!ok) {
     throw new Error(
-      `${renderer.label} could not render ${svgPath} at ${size}px ` +
+      `${renderer.label} could not render ${label} at ${size}px ` +
         `(exit ${result.code ?? 'n/a'}${result.timedOut ? ', timed out' : ''}${result.error ? `, ${result.error}` : ''})`,
     );
   }

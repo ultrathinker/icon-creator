@@ -5,6 +5,13 @@
 // no event handlers, no external or local-file references that a browser would
 // try to fetch. viewBox and width/height must describe a square, because every
 // export target is square.
+//
+// An address (href, src, url(...)) is accepted only in its plain form: empty, "#anchor" or
+// a raster data: URI, with at most spaces and control characters around it. Anything else
+// is refused, whatever it holds inside (a browser reads "ht<LF>tps://x" as "https://x",
+// so such a spelling must not slip through as something harmless). The addresses of href
+// and src are taken from the attributes of the parsed tags, never from a text scan, so no
+// spelling of the markup around them can make an attribute go unread.
 
 // Namespace prefixes are legal in XML: <s:script> with xmlns:s bound to the
 // SVG namespace IS a script element, and <image z:href="..."> with z bound
@@ -24,19 +31,20 @@ const FORBIDDEN_PATTERNS = [
   { pattern: /@import/i, message: 'uses a CSS @import' },
   { pattern: /<!DOCTYPE/i, message: 'has a DOCTYPE (external entities cannot be checked; remove it)' },
   { pattern: /javascript\s*:/i, message: 'contains a javascript: URL' },
+  { pattern: /image-set\s*\(/i, message: 'contains a CSS image-set(), which loads a picture by name (draw shapes, or use url(#id))' },
 ];
 
-function attributeValues(text, attribute) {
-  const values = [];
-  // Match the attribute's local name with any (or no) namespace prefix, so
-  // z:href bound to the XLink namespace cannot slip past the "href" check;
-  // require whitespace before the name so "stroke-width" is not mistaken
-  // for "width".
-  const pattern = new RegExp(`\\s(?:[A-Za-z_][\\w.-]*:)?${attribute}\\s*=\\s*(["'])(.*?)\\1`, 'gi');
-  for (const match of text.matchAll(pattern)) {
-    values.push({ value: match[2], raw: match[0].trimStart() });
-  }
-  return values;
+/** The attributes that hold an address, compared by local name: any case, any namespace prefix. */
+const REFERENCE_ATTRIBUTES = new Set(['href', 'src']);
+
+/**
+ * Most problems one address check reports before it stops looking. The file is refused at the first of them; a file
+ * holding a million bad addresses must not cost a million messages.
+ */
+const MAX_PROBLEMS = 20;
+
+function localName(qualified) {
+  return qualified.slice(qualified.lastIndexOf(':') + 1).toLowerCase();
 }
 
 function codePoint(base) {
@@ -55,8 +63,19 @@ function decodeEntities(text) {
 }
 
 /**
- * Decode XML numeric entities and CSS hex escapes so pattern scans cannot be
- * evaded by writing `@im\70ort`, `\75rl(...)`, `hr&#101;f=` and friends. The
+ * Undo CSS escapes the way a CSS parser does before it reads a name: a backslash with up to six hex digits (and one
+ * white space after them), or a backslash with any other character, which stands for itself. `ur\l(` is `url(` and
+ * `@\import` is `@import`.
+ */
+function unescapeCss(text) {
+  return text.replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|([\s\S]))/g, (match, hex, other) =>
+    hex !== undefined ? codePoint(16)(match, hex) : other,
+  );
+}
+
+/**
+ * Decode XML numeric entities and CSS escapes so pattern scans cannot be
+ * evaded by writing `@im\70ort`, `u\rl(...)`, `&#117;rl(` and friends. The
  * decoded copy is used for CHECKING ONLY - rendering always uses the original
  * file, and any decode oddity can only make the checker stricter, never the
  * renderer more permissive. It runs AFTER the markup structure has been
@@ -65,23 +84,43 @@ function decodeEntities(text) {
  * and hide real elements behind it.
  */
 function decodeForScanning(text) {
-  return decodeEntities(text).replace(/\\([0-9a-fA-F]{1,6})\s?/g, codePoint(16));
+  return unescapeCss(decodeEntities(text));
 }
 
-const RASTER_DATA_URL = /^data:\s*image\/(?:png|jpe?g|gif|webp|bmp)(?:[;,]|$)/i;
+const RASTER_DATA_URL = /^data:[\f ]*image\/(?:png|jpe?g|gif|webp|bmp)(?:[;,]|$)/i;
 
 /**
- * Classify one reference value. Empty values and `#anchor`s are internal.
- * `data:` URIs are allowed for raster image types ONLY: anything else under
+ * The address of a value: the whole value, with the C0 control characters and spaces at both ends cut, as a URL parser
+ * cuts them. Nothing else is repaired: an address with a tab or line break inside ("ht<LF>tps://x", which a browser
+ * reads as "https://x") is not a local one and is refused like any other. Only ASCII is cut: a no-break space in
+ * front of "#" leaves a relative path, not an anchor. Plain loops, no regex with a repeated white-space class, so a
+ * long run of spaces cannot make the cut slow.
+ */
+function trimAddress(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) start += 1;
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) end -= 1;
+  return value.slice(start, end);
+}
+
+/** An address as it goes into a message: cut short, control characters and separators spelled as U+ codes. */
+function visible(text, limit = 80) {
+  const clipped = text.length > limit ? `${text.slice(0, limit)}...` : text;
+  return clipped.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+}
+
+/**
+ * Classify one reference by its address (see trimAddress). An empty address and an `#anchor` are
+ * internal. `data:` URIs are allowed for raster image types ONLY: anything else under
  * data: (SVG in any spelling, HTML, XML, unknown types) is rejected without
  * inspecting it, because its payload is never validated here and fallback
  * renderers process it outside the browser's locked-down image mode.
  */
-function referenceProblem(kind, raw, value) {
-  const trimmed = value.trim();
-  if (trimmed === '' || trimmed.startsWith('#')) return null;
-  if (RASTER_DATA_URL.test(trimmed)) return null;
-  if (/^data:/i.test(trimmed)) {
+function referenceProblem(kind, raw, address) {
+  if (address === '' || address.startsWith('#')) return null;
+  if (RASTER_DATA_URL.test(address)) return null;
+  if (/^data:/i.test(address)) {
     return (
       `${kind} in ${raw} uses a data: URL that is not a supported raster image ` +
       '(only image/png, image/jpeg, image/gif, image/webp, image/bmp data: URIs are allowed; ' +
@@ -91,11 +130,47 @@ function referenceProblem(kind, raw, value) {
   return `non-local ${kind} in ${raw} (only "#..." anchors and raster data: URIs are allowed)`;
 }
 
+/** href and src of the parsed tags, one by one: the address is the whole attribute value, line breaks and all. */
+function checkReferenceAttributes(references, errors) {
+  let reported = 0;
+  for (const { name, value } of references) {
+    const address = trimAddress(value);
+    const problem = referenceProblem(name, `${name}="${visible(address)}"`, address);
+    if (problem === null) continue;
+    errors.push(problem);
+    reported += 1;
+    if (reported >= MAX_PROBLEMS) return;
+  }
+}
+
+/**
+ * The first characters of the address a url() holds (see trimAddress): leading control characters and spaces are
+ * skipped without counting, so padding cannot push the real start out of the window. Reading stops at a closing
+ * parenthesis or a quote, so a quoted address that holds one is judged by its start, which is what decides whether
+ * it is local.
+ */
+function addressAt(text, index, limit = 160) {
+  let address = '';
+  for (let i = index; i < text.length && address.length < limit; i += 1) {
+    const ch = text[i];
+    if (ch === ')' || ch === '"' || ch === "'") break;
+    if (address === '' && ch <= ' ') continue;
+    address += ch;
+  }
+  return address;
+}
+
+const URL_FUNCTION = /url\([\t\n\r\f ]*["']?/gi;
+
 function checkUrlFunctions(text, errors) {
-  const pattern = /url\(\s*(["']?)([^)"']*)\1\s*\)/gi;
-  for (const match of text.matchAll(pattern)) {
-    const problem = referenceProblem('external reference', match[0], match[2]);
-    if (problem !== null) errors.push(problem);
+  let reported = 0;
+  for (const match of text.matchAll(URL_FUNCTION)) {
+    const address = addressAt(text, match.index + match[0].length);
+    const problem = referenceProblem('external reference', `url(${visible(address)})`, address);
+    if (problem === null) continue;
+    errors.push(problem);
+    reported += 1;
+    if (reported >= MAX_PROBLEMS) return;
   }
 }
 
@@ -117,6 +192,30 @@ function sticky(pattern, text, index) {
 }
 
 /**
+ * Note what one tag says about addresses, into `found`: its href and src (whatever the prefix); for <animate> and <set>,
+ * a target that is itself a reference attribute (an animation could swap a harmless address for an outside one while the
+ * picture is shown, and its `to`/`values` are not addresses the static check reads); and an xml:base (it changes what
+ * even an "#anchor" resolves to, in the consumers that honour it). Any prefixed attribute whose local name is "base"
+ * counts as one, so that a prefix bound to the XML namespace (which a lenient parser may allow) does not hide it; a
+ * declaration of a prefix named "base" (xmlns:base) is not an attribute of that name.
+ */
+function collectReferences(element, attributes, found) {
+  for (const [attribute, value] of attributes) {
+    const local = localName(attribute);
+    if (REFERENCE_ATTRIBUTES.has(local)) found.references.push({ name: attribute, value });
+    if (local === 'base' && attribute.includes(':') && !/^xmlns:/i.test(attribute)) found.rebased = true;
+  }
+  if (/^(?:animate|set)$/i.test(element)) {
+    for (const [attribute, value] of attributes) {
+      const target = value.trim();
+      if (localName(attribute) === 'attributename' && REFERENCE_ATTRIBUTES.has(localName(target)) && found.animated.length < MAX_PROBLEMS) {
+        found.animated.push({ element, name: target });
+      }
+    }
+  }
+}
+
+/**
  * Walk the RAW document as a strict, conservative XML tokenizer. It is not a
  * full parser: it accepts only well-formed tags, comments and CDATA and
  * rejects everything it does not understand (unterminated constructs, a stray
@@ -126,22 +225,25 @@ function sticky(pattern, text, index) {
  * as an icon anyway, and refusing it keeps the checker and the renderer from
  * disagreeing about where the real root is.
  *
- * Returns { scan, root, elements, fatal }. `scan` is the raw text minus comments and the
+ * Returns { scan, root, elements, references, animated, rebased, fatal }. `scan` is the raw text minus comments and the
  * XML declaration, with CDATA unwrapped into inert text, ready for the pattern
- * scans; `root` holds the decoded attributes of the document element and
- * `elements` the local names of every element in document order.
+ * scans; `root` holds the decoded attributes of the document element,
+ * `elements` the local names of every element in document order, `references` the href and src
+ * attributes of every tag ({ name, value }, the value decoded), `animated` the animations that
+ * target one of them and `rebased` whether any tag carries an xml:base.
  */
 function tokenize(raw, errors) {
   const pieces = [];
   const stack = [];
   const elements = [];
+  const found = { references: [], animated: [], rebased: false };
   let root = null;
   let rootClosed = false;
   let i = raw.charCodeAt(0) === 0xfeff ? 1 : 0;
   const start = i;
   const fatal = (message) => {
     errors.push(message);
-    return { scan: pieces.join(''), root, elements, fatal: true };
+    return { scan: pieces.join(''), root, elements, ...found, fatal: true };
   };
 
   while (i < raw.length) {
@@ -219,7 +321,9 @@ function tokenize(raw, errors) {
         root = { attributes };
       }
       cursor += end[0].length;
-      elements.push(name[0].slice(name[0].indexOf(':') + 1));
+      const element = name[0].slice(name[0].indexOf(':') + 1);
+      elements.push(element);
+      collectReferences(element, attributes, found);
       pieces.push(raw.slice(i, cursor));
       if (end[1] === '/') {
         if (stack.length === 0) rootClosed = true;
@@ -231,7 +335,7 @@ function tokenize(raw, errors) {
   }
   if (root === null) return fatal('no <svg> root element found (is this an SVG file?)');
   if (stack.length > 0) errors.push('the <svg> element is never closed');
-  return { scan: pieces.join(''), root, elements, fatal: false };
+  return { scan: pieces.join(''), root, elements, ...found, fatal: false };
 }
 
 /**
@@ -258,11 +362,12 @@ export function validateSvg(text, { label = 'the SVG' } = {}) {
   for (const rule of FORBIDDEN_PATTERNS) {
     if (rule.pattern.test(scanText)) errors.push(rule.message);
   }
-  for (const attribute of ['href', 'xlink:href', 'src']) {
-    for (const { value, raw } of attributeValues(scanText, attribute)) {
-      const problem = referenceProblem(attribute, raw, value);
-      if (problem !== null) errors.push(problem);
-    }
+  checkReferenceAttributes(tokens.references, errors);
+  if (tokens.rebased) {
+    errors.push('contains an xml:base (or another prefixed "base" attribute), which changes how the references of the file are resolved; remove it');
+  }
+  for (const { element, name } of tokens.animated) {
+    errors.push(`<${element}> animates the ${visible(name)} attribute: a reference must not change while the picture is shown`);
   }
   checkUrlFunctions(scanText, errors);
 

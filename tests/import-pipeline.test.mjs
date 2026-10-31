@@ -279,9 +279,13 @@ test('decodeSource uses the built-in codecs for PNG, GIF and baseline JPEG and t
     const webp = await decodeSource(loadSource(path.join(FIXTURES, 'import-alpha.webp')), { browserDecode: fake });
     assert.equal(webp.via, 'browser');
     assert.deepEqual([asked.width, asked.height, path.basename(asked.imagePath)], [96, 96, 'import-alpha.webp']);
+    assert.ok(Buffer.from(asked.bytes).equals(fs.readFileSync(path.join(FIXTURES, 'import-alpha.webp'))), 'the browser is handed the bytes that were read');
+    assert.equal(asked.format, 'webp', 'and the format they were detected as');
     const viaBrowser = await decodeSource(loadSource(progressive), { browserDecode: fake });
     assert.equal(viaBrowser.via, 'browser', 'a JPEG the built-in decoder refuses goes to the browser');
     assert.equal(path.basename(asked.imagePath), 'progressive.jpg');
+    assert.ok(Buffer.from(asked.bytes).equals(fs.readFileSync(progressive)));
+    assert.equal(asked.format, 'jpeg');
 
     const wrongSize = async () => ({ width: 10, height: 10, rgba: canvas(10, 10, [0, 0, 0, 255]) });
     await assert.rejects(decodeSource(loadSource(path.join(FIXTURES, 'import-alpha.webp')), { browserDecode: wrongSize }), /decoded .* as 10x10, expected 96x96/);

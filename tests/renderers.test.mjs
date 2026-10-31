@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { discoverRenderers, noRendererMessage, renderPageHtml, verifyRenderedPng, renderSvgPng } from '../scripts/lib/renderers.mjs';
+import { discoverRenderers, noRendererMessage, renderPageHtml, verifyRenderedPng, renderSvgPng, withPrivateCopy } from '../scripts/lib/renderers.mjs';
 import { renderSheet } from '../scripts/lib/sheet.mjs';
 import { encodePng } from '../scripts/lib/png.mjs';
 import { dirLinkSkipReason, makeDirLink, withCwd } from './helpers.mjs';
@@ -278,6 +278,86 @@ test('renderSvgPng refuses an output whose parent directory does not exist', asy
       /does not exist; create it first/,
     );
   } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('withPrivateCopy hands over a new file holding the content, returns what use returns, and takes the file away', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-copy-'));
+  try {
+    let seenPath = null;
+    const result = await withPrivateCopy(base, 'copy.svg', 'the content', (copyPath) => {
+      seenPath = copyPath;
+      assert.equal(fs.readFileSync(copyPath, 'utf8'), 'the content');
+      return 42;
+    });
+    assert.equal(result, 42);
+    assert.equal(path.dirname(seenPath), base);
+    assert.equal(fs.existsSync(seenPath), false);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('withPrivateCopy removes the copy when use fails, and passes the failure on', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-copy-'));
+  try {
+    await assert.rejects(
+      withPrivateCopy(base, 'copy.svg', 'x', () => {
+        throw new Error('the renderer failed');
+      }),
+      /the renderer failed/,
+    );
+    assert.deepEqual(fs.readdirSync(base), []);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('withPrivateCopy never follows or removes an entry that is already there', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-copy-'));
+  try {
+    const existing = path.join(base, 'copy.svg');
+    fs.writeFileSync(existing, 'somebody else\'s file');
+    let used = false;
+    await assert.rejects(
+      withPrivateCopy(base, 'copy.svg', 'x', () => {
+        used = true;
+      }),
+      (error) => error.code === 'EEXIST',
+    );
+    assert.equal(used, false);
+    assert.equal(fs.readFileSync(existing, 'utf8'), 'somebody else\'s file', 'the entry that was there is untouched');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('withPrivateCopy retries a removal that is refused for a moment (a locked file) but not one that fails for good', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-copy-'));
+  const realRemove = fs.rmSync;
+  const attemptsFor = async (code) => {
+    let attempts = 0;
+    fs.rmSync = (target, options) => {
+      if (path.basename(String(target)) === 'copy.svg') {
+        attempts += 1;
+        throw Object.assign(new Error(`${code}: the removal failed`), { code });
+      }
+      return realRemove(target, options);
+    };
+    try {
+      await withPrivateCopy(base, 'copy.svg', 'x', () => 'used');
+    } finally {
+      fs.rmSync = realRemove;
+    }
+    realRemove(path.join(base, 'copy.svg'), { force: true });
+    return attempts;
+  };
+  try {
+    assert.equal(await attemptsFor('EBUSY'), 5, 'a locked file is tried five times, then left to the removal of the scratch folder');
+    assert.equal(await attemptsFor('EIO'), 1, 'an error that will not go away is tried once');
+  } finally {
+    fs.rmSync = realRemove;
     fs.rmSync(base, { recursive: true, force: true });
   }
 });

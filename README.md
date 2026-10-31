@@ -251,7 +251,14 @@ format specifications and verified by its own parsers plus a test suite.
   no scripts, no external or file references, `data:` URLs limited to raster
   image types (png/jpeg/gif/webp/bmp - embedded SVG is rejected), and no
   `<text>` elements (the tool checks and refuses, on a copy with XML entities
-  and CSS escapes decoded, so obfuscated spellings do not slip through).
+  and CSS escapes decoded, so obfuscated spellings do not slip through). An
+  address (`href`, `src`, `url(...)`) is accepted only as an `#anchor` or a
+  raster `data:` URI, so an address spelled with a line break or a tab inside
+  is refused too, and so are `image-set()`, an animation of `href` or `src`
+  and an `xml:base`. The renderer is given a private copy of exactly the text
+  that was checked (and the browser that decodes a WebP or BMP, a copy of the
+  bytes that were read), so a file replaced between the check and the render
+  is not what gets drawn.
   Malformed markup (unterminated comments, stray `<`, processing
   instructions other than the XML declaration, a second root) is refused, and
   so is a render that comes out completely blank.

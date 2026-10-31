@@ -339,7 +339,7 @@ function runSheet(options) {
 async function runIngest(options) {
   let renderer;
   let base = null;
-  const browserDecode = async ({ imagePath, width, height }) => {
+  const browserDecode = async ({ imagePath, bytes, format, width, height }) => {
     if (renderer === undefined) {
       const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
       const browser = discovery.candidates.find((candidate) => candidate.kind === 'browser' && candidate.found);
@@ -347,7 +347,7 @@ async function runIngest(options) {
     }
     if (renderer === null) throw new Error('reading it needs a headless browser (Chrome, Chromium or Edge), and none was found');
     base ??= fs.mkdtempSync(path.join(os.tmpdir(), 'icon-creator-ingest-'));
-    return decodeImageWithBrowser({ imagePath, width, height, renderer, tempDir: base });
+    return decodeImageWithBrowser({ imagePath, bytes, format, width, height, renderer, tempDir: base });
   };
   try {
     const onNote = (line) => process.stderr.write(`${line}\n`);

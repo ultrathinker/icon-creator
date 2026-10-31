@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1]
+
+### Security
+- The SVG check could miss a reference whose address held a line break: `href`, `xlink:href` and `src` values were
+  found by a pattern that stopped at the first line break, so `<image href="https://example.com/a.png&#10;">` was
+  never examined. The addresses are now taken from the parsed tags, one by one, and an address is accepted only as
+  empty, as an `#anchor` or as a raster `data:` URI (spaces, control characters and line breaks around it are
+  ignored); anything else is refused, whatever it holds inside.
+- The CSS side of the same check is tightened. `url(...)` is read by the start of its address, so a quoted address
+  that holds a closing parenthesis or the other kind of quote no longer slips through; every CSS escape is undone
+  before the scans (`ur\l(` and `@im\port` as well as hex escapes); `image-set()` is refused; and so is an
+  `<animate>` or `<set>` that targets an `href` or `src` attribute.
+- An `xml:base` is refused, and so is any other prefixed attribute named `base` (a prefix bound to the XML namespace
+  must not hide it): it changes what even an `#anchor` resolves to in the renderers that honour it.
+- The renderer, a browser or a command-line tool, is now given a private copy of exactly the text that was checked,
+  not the path of the user's file, so a file replaced between the check and the render is not what gets drawn. The
+  browser that decodes a WebP, a BMP or a rare JPEG is likewise shown a private copy of the bytes that were read.
+- A message about a refused address shows its control characters as `U+` codes and cuts a long address short, and a
+  file holding thousands of bad addresses or animations is refused after twenty messages per check instead of
+  building them all.
+
 ## [1.0.0]
 
 ### Added

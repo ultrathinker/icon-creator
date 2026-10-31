@@ -375,7 +375,8 @@ relative to `<root>`; use the real path.
   inside the file are fine; `href`/`src`/`url()` pointing at files or web
   addresses, every non-raster `data:` URL (SVG embedded through data: is
   never inspected - only png/jpeg/gif/webp/bmp data: images are allowed),
-  `<script>`, event handlers, `<foreignObject>` and DOCTYPEs are rejected.
+  `<script>`, event handlers, `<foreignObject>`, DOCTYPEs, `xml:base`,
+  `image-set()` and `<animate>`/`<set>` on `href` or `src` are rejected.
 - Draw letters as paths. `<text>` and `<tspan>` are rejected: a renderer
   without the right font produces garbage. At most one bold monogram, and
   only if it reads at 16 px.

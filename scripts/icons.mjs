@@ -252,11 +252,11 @@ async function importCommand(options) {
     noteLinks('The image file is in', srcPath, { file: true });
     noteLinks('The output folder', options.out);
     // The browser is only needed for WebP, BMP and the rare JPEG or PNG the built-in decoders refuse: find it on demand.
-    const browserDecode = async ({ imagePath, width, height }) => {
+    const browserDecode = async ({ imagePath, bytes, format, width, height }) => {
       const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
       const renderer = pickRenderer(discovery, options.renderer);
       if (!renderer) throw new Error(noRendererMessage());
-      return decodeImageWithBrowser({ imagePath, width, height, renderer, tempDir: base });
+      return decodeImageWithBrowser({ imagePath, bytes, format, width, height, renderer, tempDir: base });
     };
     const result = await importImage({
       srcPath,
