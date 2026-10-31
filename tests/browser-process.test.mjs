@@ -194,10 +194,9 @@ test('renderSvgPng fails with a clear message when the browser never writes anyt
 
 // ---- the renderer is shown the text that was checked, not the path ------------------------------------------------
 
-const CHECKED_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" fill="#1234aa"/></svg>';
-const SWAPPED_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><image href="http://127.0.0.1:9/evil.png" x="4" y="4" width="1" height="1"/>' +
-  '<rect x="4" y="4" width="8" height="8" fill="#12aa34"/></svg>';
+// The sample SVGs are files: the one that is checked, and a different one that replaces it after the check.
+const CHECKED_SVG = fs.readFileSync(path.join(here, 'fixtures', 'checked.svg'), 'utf8');
+const SWAPPED_SVG = fs.readFileSync(path.join(here, 'fixtures', 'swapped.svg'), 'utf8');
 
 async function withEnv(values, body) {
   const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));

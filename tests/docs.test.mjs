@@ -158,10 +158,11 @@ test('the skill and the command have valid front matter and the version is bumpe
   assert.match(COMMAND, /\$ARGUMENTS/);
   assert.match(SKILL, /^name: icon-creator$/m);
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
-  assert.equal(manifest.version, '1.0.1');
+  assert.equal(manifest.version, '1.0.2');
   assert.match(manifest.description, /your own image file, or a folder of your pictures/);
   const market = JSON.parse(read('.claude-plugin/marketplace.json'));
   assert.match(market.plugins[0].description, /choose the best of a folder of your pictures/);
+  assert.match(read('CHANGELOG.md'), /^## \[1\.0\.2\]$/m);
   assert.match(read('CHANGELOG.md'), /^## \[1\.0\.1\]$/m);
   assert.match(read('CHANGELOG.md'), /^## \[1\.0\.0\]$/m);
 });

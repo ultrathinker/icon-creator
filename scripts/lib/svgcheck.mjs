@@ -8,8 +8,8 @@
 //
 // An address (href, src, url(...)) is accepted only in its plain form: empty, "#anchor" or
 // a raster data: URI, with at most spaces and control characters around it. Anything else
-// is refused, whatever it holds inside (a browser reads "ht<LF>tps://x" as "https://x",
-// so such a spelling must not slip through as something harmless). The addresses of href
+// is refused, whatever it holds inside (a browser drops a line break from the middle of an
+// address, so a scheme with one in it must not slip through as something harmless). The addresses of href
 // and src are taken from the attributes of the parsed tags, never from a text scan, so no
 // spelling of the markup around them can make an attribute go unread.
 
@@ -91,8 +91,8 @@ const RASTER_DATA_URL = /^data:[\f ]*image\/(?:png|jpe?g|gif|webp|bmp)(?:[;,]|$)
 
 /**
  * The address of a value: the whole value, with the C0 control characters and spaces at both ends cut, as a URL parser
- * cuts them. Nothing else is repaired: an address with a tab or line break inside ("ht<LF>tps://x", which a browser
- * reads as "https://x") is not a local one and is refused like any other. Only ASCII is cut: a no-break space in
+ * cuts them. Nothing else is repaired: an address with a tab or line break inside (a scheme split in two, which a browser
+ * reads as one) is not a local one and is refused like any other. Only ASCII is cut: a no-break space in
  * front of "#" leaves a relative path, not an anchor. Plain loops, no regex with a repeated white-space class, so a
  * long run of spaces cannot make the cut slow.
  */

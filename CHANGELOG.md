@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.2]
+
+### Changed
+- Housekeeping, no change in behaviour: the sample SVGs of the browser tests are fixture files now, and two comments of
+  the SVG check were reworded.
+
 ## [1.0.1]
 
 ### Security
