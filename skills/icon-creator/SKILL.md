@@ -25,7 +25,7 @@ folder (see the last section).
 
 ## Workflow
 
-**Paths and links.** This applies to every path you pass - the SVG or image you
+**Paths and links.** This applies to every path you give - the SVG or image you
 read as well as the folder or file you write. A path may go through a symbolic link or junction
 that is outside the current folder (macOS `/var`, `/tmp`, a linked project
 folder, a Windows junction): the tool follows it once and prints a line starting
@@ -197,7 +197,7 @@ are still opaque: explain, and offer a background removal or another image
 (back to F3).
 
 Every command that writes a file refuses to replace an existing one unless you
-pass `--force`: use new names (`sheet-2.png`, `check-2.png`) or add `--force`.
+give it `--force`: use new names (`sheet-2.png`, `check-2.png`) or add `--force`.
 
 **F7. Summary.** Finish with the section "Tell the user what exists and how to
 wire it" below, and include: what the tool measured and any warning (in plain
@@ -287,7 +287,7 @@ built).
 **Later rounds.** When the user adds pictures to the folder and asks again,
 run the same `ingest` (it adds only the new pictures, numbered after the
 others), then `build --only <new numbers>` with the same `--title` and
-`sheet --only <new numbers>` (which write new sheet files). Never pass
+`sheet --only <new numbers>` (which write new sheet files). Never add
 `--force` to redo what exists.
 
 ## Draw mode: you design the icon
@@ -381,7 +381,7 @@ relative to `<root>`; use the real path.
   without the right font produces garbage. At most one bold monogram, and
   only if it reads at 16 px.
 
-**Design rules (your checklist - every concept must pass all eight):**
+**Design rules (your checklist - every concept must meet all eight):**
 
 1. **One shape, one idea.** A single motif a stranger can name in one word.
 2. **Fill over line.** Solid forms; any stroke at least 12 units wide at a
@@ -397,25 +397,15 @@ relative to `<root>`; use the real path.
 7. **Reads at 16 px** - verified below, not assumed.
 8. **No text except one bold monogram.**
 
-A safe skeleton to start from (replace the placeholder rect with a motif
-150-160 units wide, centred in the container, in high contrast to it):
-
-```xml
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3730A3"/>
-      <stop offset="1" stop-color="#0EA5E9"/>
-    </linearGradient>
-  </defs>
-  <rect x="10" y="10" width="236" height="236" rx="52" fill="url(#bg)"/>
-</svg>
-```
+A safe skeleton to start from is in `references/svg-skeleton.md` next to this
+file: read it, copy it into your concept file, and replace the placeholder rect
+with a motif 150-160 units wide, centred in the container, in high contrast to
+it.
 
 ### D3. Look at the concepts side by side
 
-Pass exactly the concept files you created - two concepts, two arguments;
-three concepts, three (with one concept, pass the one file):
+Give exactly the concept files you created - two concepts, two arguments;
+three concepts, three (with one concept, the one file):
 
     node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs" sheet icon-work/concept-a.svg icon-work/concept-b.svg --out icon-work/sheet-1.png
 
@@ -447,7 +437,7 @@ closer:
 
     node "${CLAUDE_PLUGIN_ROOT}/scripts/icons.mjs" render icon-work/concept-a.svg --size 256 --out icon-work/look.png
 
-Stop as soon as the icon passes the checklist at 256 px - or after three
+Stop as soon as the icon meets the checklist at 256 px - or after three
 refinement rounds, whichever comes first. Say which round you stopped at.
 
 ### D5. The 16 px test (mandatory, never skip)
@@ -483,7 +473,7 @@ flags: `--small icon-work/small.svg` (use the small variant for 16-32 px),
 in your summary.
 
 Every command that writes a file refuses to replace an existing one unless
-you pass `--force`, and `export` also refuses to write into a non-empty
+you add `--force`, and `export` also refuses to write into a non-empty
 folder without it - so if a step needs to redo an output, either use a new
 file name (preferable: `sheet-2.png`, `check-2.png`) or add `--force`.
 

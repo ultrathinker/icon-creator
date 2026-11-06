@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.3]
+
+### Changed
+- Housekeeping, no change in behaviour: the SVG namespace is one constant in a file of its own, the sample drawing of
+  the skill is a page of its own (`references/svg-skeleton.md`), a few words of the skill are put differently, and a
+  test keeps a web address and an environment read out of the same script or test.
+
 ## [1.0.2]
 
 ### Changed

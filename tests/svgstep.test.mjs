@@ -12,6 +12,7 @@ import { discoverRenderers } from '../scripts/lib/renderers.mjs';
 import { planPack, headHtmlText, buildPack, prepareCandidate } from '../scripts/lib/packbuild.mjs';
 import { decodePng, encodePng } from '../scripts/lib/png.mjs';
 import { makeTmpDir } from './tmp.mjs';
+import { SVG_NS } from '../scripts/lib/svgns.mjs';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
@@ -173,7 +174,7 @@ test('planPack: an SVG adds icon.svg, web/favicon.svg and the scalable Linux ico
 });
 
 test('buildPack with an SVG writes the drawing byte for byte', () => {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#fbcc0d"/></svg>\n';
+  const svg = '<svg xmlns="' + SVG_NS + '" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#fbcc0d"/></svg>\n';
   const prepared = prepareCandidate(encodePng(SIZE, SIZE, bee()), { crop: false });
   const written = new Map();
   buildPack(prepared, { name: 'bee', svg, publish: (rel, buffer) => written.set(rel, buffer) });
@@ -199,7 +200,7 @@ function runWithDrawing(label, svg) {
   fs.writeFileSync(path.join(dir, 'svg-1-draft.svg'), svg);
   return dir;
 }
-const GOOD = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><clipPath id="c"><circle cx="256" cy="256" r="176"/></clipPath></defs><circle cx="256" cy="256" r="200" fill="#0e0e0e"/><circle cx="256" cy="256" r="176" fill="#fff"/><rect x="0" y="240" width="512" height="60" fill="#fbcc0d" clip-path="url(#c)"/></svg>\n';
+const GOOD = '<svg xmlns="' + SVG_NS + '" viewBox="0 0 512 512"><defs><clipPath id="c"><circle cx="256" cy="256" r="176"/></clipPath></defs><circle cx="256" cy="256" r="200" fill="#0e0e0e"/><circle cx="256" cy="256" r="176" fill="#fff"/><rect x="0" y="240" width="512" height="60" fill="#fbcc0d" clip-path="url(#c)"/></svg>\n';
 const run = async (...args) => JSON.parse((await execFileAsync(process.execPath, [SVG, ...args])).stdout);
 
 test('svg.mjs measure needs no renderer and prints the numbers for a candidate', async () => {
@@ -221,9 +222,9 @@ test('svg.mjs refuses what it cannot use, with a message that names the problem'
   await fails(['measure', '--run', dir, '--number', '9'], /no candidate-9/);
   await fails(['check', '--run', dir, '--number', '1'], /--svg/);
   await fails(['measure', '--run', dir, '--number', '1', '--rows', 'a,b'], /whole numbers/);
-  fs.writeFileSync(path.join(dir, 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><script>alert(1)</script></svg>');
+  fs.writeFileSync(path.join(dir, 'evil.svg'), '<svg xmlns="' + SVG_NS + '" viewBox="0 0 8 8"><script>alert(1)</script></svg>');
   await fails(['check', '--run', dir, '--number', '1', '--svg', path.join(dir, 'evil.svg')], /cannot be used[\s\S]*script/);
-  const wrapped = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><image width="8" height="8" href="data:image/png;base64,iVBORw0KGgo="/></svg>';
+  const wrapped = '<svg xmlns="' + SVG_NS + '" viewBox="0 0 8 8"><image width="8" height="8" href="data:image/png;base64,iVBORw0KGgo="/></svg>';
   fs.writeFileSync(path.join(dir, 'wrapped.svg'), wrapped);
   await fails(['check', '--run', dir, '--number', '1', '--svg', path.join(dir, 'wrapped.svg')], /<image> element[\s\S]*not a vector/);
   await fails(['pack', '--run', dir, '--number', '1', '--svg', path.join(dir, 'wrapped.svg')], /<image> element/);
@@ -238,7 +239,7 @@ test('svg.mjs check draws the SVG, compares it, and writes the comparison pictur
   const second = await run('check', '--run', dir, '--number', '1', '--no-crop', '--svg', path.join(dir, 'svg-1-draft.svg'));
   assert.notEqual(second.picture, first.picture, 'the second check is a new file');
   assert.ok(fs.existsSync(first.picture) && fs.existsSync(second.picture));
-  const wrong = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="150" cy="256" r="120" fill="#fbcc0d"/></svg>';
+  const wrong = '<svg xmlns="' + SVG_NS + '" viewBox="0 0 512 512"><circle cx="150" cy="256" r="120" fill="#fbcc0d"/></svg>';
   fs.writeFileSync(path.join(dir, 'wrong.svg'), wrong);
   const bad = await run('check', '--run', dir, '--number', '1', '--no-crop', '--svg', path.join(dir, 'wrong.svg'));
   assert.equal(bad.metrics.verdict, 'off');

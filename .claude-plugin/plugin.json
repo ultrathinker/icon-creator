@@ -1,7 +1,7 @@
 {
   "name": "icon-creator",
   "displayName": "Icon Creator",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Turn a plain-language app description, your own image file, or a folder of your pictures into a finished cross-platform icon set: reviewed at real sizes, candidates compared side by side at 64/32/16 px, exported as Windows .ico, macOS .icns, the Linux hicolor tree, web favicons and master files.",
   "author": {
     "name": "ultrathinker"

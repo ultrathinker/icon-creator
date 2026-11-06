@@ -11,6 +11,8 @@ import { MAX_INPUT_BYTES, MAX_SIDE } from '../scripts/lib/imagefile.mjs';
 import { DEFAULT_TOLERANCE, BACKGROUND_MODES } from '../scripts/lib/importimg.mjs';
 import { planFiles, TARGETS } from '../scripts/lib/export.mjs';
 import { linkNote } from '../scripts/lib/publish.mjs';
+import { validateSvg } from '../scripts/lib/svgcheck.mjs';
+import { SVG_NS } from '../scripts/lib/svgns.mjs';
 
 const read = (relative) => fs.readFileSync(path.resolve(relative), 'utf8').replace(/\r\n/g, '\n');
 // Prose wraps at 80 columns, so wording checks run on text with whitespace collapsed.
@@ -158,10 +160,11 @@ test('the skill and the command have valid front matter and the version is bumpe
   assert.match(COMMAND, /\$ARGUMENTS/);
   assert.match(SKILL, /^name: icon-creator$/m);
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
-  assert.equal(manifest.version, '1.0.2');
+  assert.equal(manifest.version, '1.0.3');
   assert.match(manifest.description, /your own image file, or a folder of your pictures/);
   const market = JSON.parse(read('.claude-plugin/marketplace.json'));
   assert.match(market.plugins[0].description, /choose the best of a folder of your pictures/);
+  assert.match(read('CHANGELOG.md'), /^## \[1\.0\.3\]$/m);
   assert.match(read('CHANGELOG.md'), /^## \[1\.0\.2\]$/m);
   assert.match(read('CHANGELOG.md'), /^## \[1\.0\.1\]$/m);
   assert.match(read('CHANGELOG.md'), /^## \[1\.0\.0\]$/m);
@@ -351,7 +354,7 @@ test('the link rule is documented for input paths as well as output paths', () =
   const readme = flat(README);
   assert.match(readme, /This covers every path you name: the output folder or file, the SVG you render, sheet, check or export \(and its small variant\), and the image you import/);
   assert.match(readme, /it never reads an input file that is itself a link/);
-  assert.match(SKILL_FLAT, /This applies to every path you pass - the SVG or image you read as well as the folder or file you write/);
+  assert.match(SKILL_FLAT, /This applies to every path you give - the SVG or image you read as well as the folder or file you write/);
   assert.match(SKILL_FLAT, /A file that is itself a link is refused as an input/);
   assert.match(flat(read('CHANGELOG.md')), /The same link rule now covers every input path/);
 });
@@ -420,7 +423,7 @@ test('folder mode asks only the location and the pick, and builds a pack for eve
   assert.match(SKILL_FLAT, /still ask question 0 \(unless the request already decides the mode\), go on only with folder mode/);
   assert.match(folder, /read it before G3/);
   assert.match(folder, /Only when the user asks for it, read `references\/svg-step\.md`/);
-  assert.match(folder, /Never pass `--force` to redo what exists/);
+  assert.match(folder, /Never add `--force` to redo what exists/);
   assert.match(SKILL_FLAT, /Folder mode does not ask it either/);
 });
 
@@ -435,6 +438,18 @@ test('the skill names both reference pages, and the folder-mode page explains ev
   }
   assert.match(flat(SVG_REF), /a redrawn copy, not the picture traced/);
   assert.match(flat(SVG_REF), /`close` up to 2 %, `near` up to 6 %, else `off`/);
+});
+
+test('the skeleton is a page of its own: the skill points to it and the drawing on it passes the SVG check', () => {
+  assert.ok(SKILL.includes('`references/svg-skeleton.md`'));
+  assert.ok(!/https?:\/\//.test(SKILL), 'the skill itself carries no web address');
+  const block = read('skills/icon-creator/references/svg-skeleton.md').match(/```xml\n([\s\S]*?)\n```/);
+  assert.ok(block, 'the page holds an xml block');
+  assert.ok(block[1].includes(`xmlns="${SVG_NS}"`), 'the root declares the SVG namespace');
+  const result = validateSvg(block[1]);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.viewBox, { minX: 0, minY: 0, width: 256, height: 256 });
 });
 
 test('the documents say what folder mode reads and that the pictures are only read', () => {
@@ -454,7 +469,7 @@ test('the documents say what folder mode reads and that the pictures are only re
 
 test('the shipped words describe a local tool: no image generation and no keys', () => {
   const shipped = ['skills/icon-creator/SKILL.md', 'skills/icon-creator/references/folder-mode.md', 'skills/icon-creator/references/svg-step.md',
-    'commands/icon.md', 'agents/icon-designer.md', 'README.md', 'PRIVACY.md', 'SECURITY.md', '.claude-plugin/plugin.json',
+    'skills/icon-creator/references/svg-skeleton.md', 'commands/icon.md', 'agents/icon-designer.md', 'README.md', 'PRIVACY.md', 'SECURITY.md', '.claude-plugin/plugin.json',
     '.claude-plugin/marketplace.json', ...fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs')).map((f) => `scripts/${f}`),
     ...fs.readdirSync('scripts/lib').map((f) => `scripts/lib/${f}`)];
   for (const file of shipped) {

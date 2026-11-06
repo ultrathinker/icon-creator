@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { discoverRenderers } from '../scripts/lib/renderers.mjs';
+import { SVG_NS } from '../scripts/lib/svgns.mjs';
 
 const CLI = path.resolve('scripts/icons.mjs');
 const discovery = discoverRenderers({ platform: process.platform, pathValue: process.env.PATH ?? '' });
@@ -48,7 +49,7 @@ test('the CLI rejects an SVG whose real root is masked by a comment', () => {
     fs.writeFileSync(
       svg,
       '<!-- <svg viewBox="0 0 256 256"></svg> -->\n' +
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 256"><rect x="8" y="8" width="284" height="240" rx="44" fill="#2563eb"/></svg>',
+        '<svg xmlns="' + SVG_NS + '" viewBox="0 0 300 256"><rect x="8" y="8" width="284" height="240" rx="44" fill="#2563eb"/></svg>',
     );
     const out = path.join(base, 'out.png');
     const { code, stderr } = runCli(['render', svg, '--size', '16', '--out', out]);
@@ -66,8 +67,8 @@ test('the CLI rejects an SVG whose real root hides behind an unterminated proces
     const svg = path.join(base, 'pi-root.svg');
     fs.writeFileSync(
       svg,
-      '<?review\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"></svg>\n' +
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 256"><rect x="8" y="8" width="284" height="240" rx="44" fill="#2563eb"/></svg>',
+      '<?review\n<svg xmlns="' + SVG_NS + '" viewBox="0 0 256 256"></svg>\n' +
+        '<svg xmlns="' + SVG_NS + '" viewBox="0 0 300 256"><rect x="8" y="8" width="284" height="240" rx="44" fill="#2563eb"/></svg>',
     );
     const out = path.join(base, 'out.png');
     const { code, stderr } = runCli(['render', svg, '--size', '16', '--out', out]);

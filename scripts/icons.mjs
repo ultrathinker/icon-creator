@@ -12,6 +12,7 @@ import { renderSheet, DEFAULT_SHEET_SIZES, DEFAULT_CHECK_SIZES } from './lib/she
 import { runExport, TARGETS } from './lib/export.mjs';
 import { importImage, describeImport, DEFAULT_TOLERANCE, BACKGROUND_MODES } from './lib/importimg.mjs';
 import { resolveNamedPath, resolveInputFile, linkNote } from './lib/publish.mjs';
+import { SVG_NS } from './lib/svgns.mjs';
 
 const USAGE = `icon-creator: design-time icon toolchain for app icons (no dependencies)
 
@@ -212,7 +213,7 @@ async function doctor(options) {
     const testSvg = path.join(base, 'doctor.svg');
     fs.writeFileSync(
       testSvg,
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">' +
+      `<svg xmlns="${SVG_NS}" viewBox="0 0 256 256">` +
         '<rect x="48" y="48" width="160" height="160" rx="40" fill="#4F46E5"/>' +
         '<circle cx="128" cy="128" r="44" fill="#F9FAFB"/></svg>',
     );

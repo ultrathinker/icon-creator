@@ -13,6 +13,7 @@ import { sanitizeName, ensureRealDir, publishFile } from './export.mjs';
 import { resolveNamedPath } from './publish.mjs';
 import { borderReference, cornersUniform, cornerPixels, meanColor, removeBackground, cleanDarkEdge, resizeArea, fitToSquare } from './pixels.mjs';
 import { decodeJpeg } from './jpeg.mjs';
+import { SVG_NS } from './svgns.mjs';
 
 export const MASTER_SIZE = 1024;
 export const DEFAULT_TOLERANCE = 32;
@@ -307,7 +308,7 @@ export function prepareMaster({ decoded, background = 'auto', tolerance = DEFAUL
 /** The wrapper SVG: the master PNG as a raster data URL on a square viewBox. */
 export function wrapperSvg(png, size) {
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">\n` +
+    `<svg xmlns="${SVG_NS}" viewBox="0 0 ${size} ${size}">\n` +
     `<image href="data:image/png;base64,${png.toString('base64')}" x="0" y="0" width="${size}" height="${size}"/>\n` +
     '</svg>\n'
   );
